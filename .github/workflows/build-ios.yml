@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Test
-        run: echo "Ubuntu runner works!"
+        run: echo "Runner is ready!"
 
   build:
     name: Build iOS IPA
@@ -28,6 +28,12 @@ jobs:
       - name: Set Xcode Version
         run: |
           xcodebuild -version
+
+      - name: Sync App Version with Release Tag
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.${{ github.run_number }}" StreamVOD/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" StreamVOD/Info.plist
+          echo "Updated Info.plist version to 1.0.${{ github.run_number }}"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -69,8 +75,8 @@ jobs:
           name: MimuSinema v1.0.${{ github.run_number }}
           files: MimuSinema.ipa
           body: |
-            🎉 **MimuSinema iOS IPA Hazır!**
+            🎉 **MimuSinema iOS v1.0.${{ github.run_number }} IPA Hazır!**
             
-            - **Kurulum:** İndirdiğiniz `MimuSinema.ipa` dosyasını Windows bilgisayarınızda **Sideloadly**, **AltStore** veya **TrollStore** kullanarak iPhone'unuza yükleyebilirsiniz.
+            - **Kurulum:** İndirdiğiniz `MimuSinema.ipa` dosyasını Windows bilgisayarınızda **Sideloadly** veya telefonunuzdaki **AltStore/SideStore/TrollStore** ile yükleyebilirsiniz.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

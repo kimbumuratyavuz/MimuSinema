@@ -20,8 +20,8 @@ public struct GitHubReleaseAsset: Codable {
 public final class AppUpdateService: ObservableObject {
     public static let shared = AppUpdateService()
     
-    // GitHub Releases API Endpoint
     private let releaseApiUrl = URL(string: "https://api.github.com/repos/kimbumuratyavuz/MimuSinema/releases/latest")!
+    private let skippedVersionKey = "mimusinema_skipped_version"
     
     @Published public var hasUpdate: Bool = false
     @Published public var latestVersionTag: String = ""
@@ -31,11 +31,8 @@ public final class AppUpdateService: ObservableObject {
     
     // Cihazdaki Mevcut Sürüm
     public var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
-    }
-    
-    public var currentBuildNumber: Int {
-        Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1") ?? 1
+        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        return ver.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     private init() {}
@@ -46,6 +43,7 @@ public final class AppUpdateService: ObservableObject {
             do {
                 var request = URLRequest(url: releaseApiUrl)
                 request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                request.cachePolicy = .reloadIgnoringLocalCacheData
                 request.timeoutInterval = 10
                 
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -53,11 +51,17 @@ public final class AppUpdateService: ObservableObject {
                 
                 let release = try JSONDecoder().decode(GitHubReleaseInfo.self, from: data)
                 
-                // Sürüm Numarası Karşılaştırma (Örn: v1.0.12 -> 1.0.12)
                 let remoteTag = release.tag_name.replacingOccurrences(of: "v", with: "").trimmingCharacters(in: .whitespaces)
                 let localVer = self.currentVersion.replacingOccurrences(of: "v", with: "").trimmingCharacters(in: .whitespaces)
                 
-                if isVersion(remoteTag, greaterThan: localVer) {
+                // KULLANICI BU SÜRÜMÜ DAHA ÖNCE ATLADIYSA VEYA AYNI SÜRÜMSE UYARI VERME
+                let skipped = UserDefaults.standard.string(forKey: self.skippedVersionKey) ?? ""
+                if remoteTag == skipped {
+                    return
+                }
+                
+                // YALNIZCA GERÇEKTEN DAHA BÜYÜK BİR SÜRÜM VARSA UYARI VER
+                if isVersion(remoteTag, strictlyGreaterThan: localVer) {
                     self.latestVersionTag = release.tag_name
                     self.releaseNotes = release.body ?? "Hata düzeltmeleri ve performans iyileştirmeleri yapıldı."
                     self.releasePageUrl = URL(string: release.html_url)
@@ -69,6 +73,8 @@ public final class AppUpdateService: ObservableObject {
                     }
                     
                     self.hasUpdate = true
+                } else {
+                    self.hasUpdate = false
                 }
             } catch {
                 print("Update check error: \(error.localizedDescription)")
@@ -76,8 +82,15 @@ public final class AppUpdateService: ObservableObject {
         }
     }
     
-    /// Semantik sürüm karşılaştırma (örn. 1.0.12 > 1.0.10)
-    private func isVersion(_ v1: String, greaterThan v2: String) -> Bool {
+    public func skipThisVersion() {
+        UserDefaults.standard.set(latestVersionTag.replacingOccurrences(of: "v", with: ""), forKey: skippedVersionKey)
+        hasUpdate = false
+    }
+    
+    /// Kesin büyüklük karşılaştırması (remote > local)
+    private func isVersion(_ v1: String, strictlyGreaterThan v2: String) -> Bool {
+        if v1 == v2 { return false } // AYNI SÜRÜMDE KESİNLİKLE FALSE
+        
         let parts1 = v1.split(separator: ".").compactMap { Int($0) }
         let parts2 = v2.split(separator: ".").compactMap { Int($0) }
         

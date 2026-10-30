@@ -5,34 +5,35 @@ public struct UpdateDialogView: View {
     
     public var body: some View {
         ZStack {
-            Color.black.opacity(0.7)
+            Color.black.opacity(0.75)
                 .ignoresSafeArea()
             
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 // İkon
                 ZStack {
                     Circle()
                         .fill(Color.red.opacity(0.2))
-                        .frame(width: 70, height: 70)
+                        .frame(width: 64, height: 64)
                     
                     Image(systemName: "arrow.down.app.fill")
-                        .font(.system(size: 34))
+                        .font(.system(size: 32))
                         .foregroundColor(.red)
                 }
                 
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     Text("Yeni Sürüm Mevcut!")
-                        .font(.title3)
+                        .font(.headline)
                         .fontWeight(.black)
                         .foregroundColor(.white)
                     
-                    Text("MimuSinema \(updateService.latestVersionTag) hazır.")
+                    Text("MimuSinema \(updateService.latestVersionTag)")
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(.red)
+                        .fontWeight(.bold)
                     
-                    Text("Mevcut Sürüm: v\(updateService.currentVersion)")
+                    Text("Yüklü Sürümünüz: v\(updateService.currentVersion)")
                         .font(.caption2)
-                        .foregroundColor(.gray.opacity(0.8))
+                        .foregroundColor(.gray)
                 }
                 
                 // Güncelleme Notları
@@ -45,45 +46,64 @@ public struct UpdateDialogView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                     }
-                    .frame(maxHeight: 120)
+                    .frame(maxHeight: 100)
                     .background(Color.white.opacity(0.06))
                     .cornerRadius(8)
                 }
                 
+                // Bilgilendirme Notu
+                Text("Yeni sürümü bilgisayardan (Sideloadly) veya telefonunuzdaki AltStore/SideStore/TrollStore ile güncelleyebilirsiniz.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+                
                 // Eylem Butonları
-                VStack(spacing: 10) {
-                    // İNDİR VE GÜNCELLE BUTONU
+                VStack(spacing: 8) {
+                    // 1. RELEASES & IPA SAYFASINA GİT BUTONU
                     Button(action: {
-                        if let url = updateService.ipaDownloadUrl ?? updateService.releasePageUrl {
+                        if let url = updateService.releasePageUrl ?? updateService.ipaDownloadUrl {
                             UIApplication.shared.open(url)
                         }
                     }) {
                         HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.circle.fill")
-                            Text("Yeni Sürümü İndir (.ipa)")
+                            Image(systemName: "safari.fill")
+                            Text("GitHub'da Güncellemeyi Aç")
+                                .font(.caption)
                                 .fontWeight(.bold)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 11)
                         .background(Color.red)
                         .foregroundColor(.white)
                         .cornerRadius(8)
                     }
                     
-                    // DAHA SONRA BUTONU
+                    // 2. BU SÜRÜMÜ BİR DAHA GÖSTERME
+                    Button(action: {
+                        withAnimation {
+                            updateService.skipThisVersion()
+                        }
+                    }) {
+                        Text("Bu Sürümü Bir Daha Gösterme")
+                            .font(.caption2)
+                            .foregroundColor(.gray.opacity(0.9))
+                            .padding(.vertical, 4)
+                    }
+                    
+                    // 3. KAPAT
                     Button(action: {
                         withAnimation {
                             updateService.hasUpdate = false
                         }
                     }) {
-                        Text("Daha Sonra")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding(.vertical, 6)
+                        Text("Kapat")
+                            .font(.caption2)
+                            .foregroundColor(.gray.opacity(0.7))
                     }
                 }
             }
-            .padding(24)
+            .padding(22)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color(red: 0.1, green: 0.1, blue: 0.13))
@@ -92,8 +112,8 @@ public struct UpdateDialogView: View {
                             .stroke(Color.white.opacity(0.15), lineWidth: 1)
                     )
             )
-            .padding(.horizontal, 36)
-            .shadow(color: .black.opacity(0.8), radius: 25)
+            .padding(.horizontal, 32)
+            .shadow(color: .black.opacity(0.85), radius: 25)
         }
     }
 }
