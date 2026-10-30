@@ -34,10 +34,12 @@ public struct CustomPlayerView: View {
     @State private var controlsTimer: Timer?
     @State private var playbackErrorMessage: String? = nil
     
-    // Süre
+    // Süre & Akıllı Arama Durumları
     @State private var currentTime: Double = 0
     @State private var totalDuration: Double = 0
     @State private var isDraggingSlider: Bool = false
+    @State private var isSeeking: Bool = false
+    @State private var pendingSeekTarget: Double? = nil
     
     // Boyut (Aspect Ratio) Modu
     @State private var aspectModeIndex: Int = 0
@@ -351,7 +353,7 @@ public struct CustomPlayerView: View {
                     in: 0...max(totalDuration, 1.0)
                 ) { editing in
                     if !editing {
-                        seekTo(seconds: currentTime)
+                        performSmoothSeek(to: currentTime)
                         isDraggingSlider = false
                         resetControlsTimer()
                     }
@@ -394,35 +396,40 @@ public struct CustomPlayerView: View {
         resetControlsTimer()
     }
     
-    // MARK: - Oynatıcı Yükleme (İndirilen Dosya & Canlı Akış)
+    // MARK: - Oynatıcı Yükleme & Tamponlama Optimizasyonu
     private func loadPlayer() {
         player?.pause()
         playbackErrorMessage = nil
         
-        // 1. ÖNCE CİHAZDA İNDİRİLMİŞ YEREL DOSYA KONTROLÜ
+        let item: AVPlayerItem
+        
         if let localUrl = DownloadManagerService.shared.resolvedLocalUrl(for: currentMedia) {
             let asset = AVURLAsset(url: localUrl)
-            let item = AVPlayerItem(asset: asset)
-            setupPlayerWithItem(item)
-            return
+            item = AVPlayerItem(asset: asset)
+        } else {
+            var headers: [String: String] = [:]
+            if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
+            if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
+            
+            let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+            item = AVPlayerItem(asset: asset)
+            
+            // DONMAYI ÖNLEME: İleriye dönük 15 saniyelik tampon belleği garantiye al
+            item.preferredForwardBufferDuration = 15.0
+            item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         }
         
-        // 2. YEREL DOSYA YOKSA ONLİNE AKIŞI OYNAT
-        var headers: [String: String] = [:]
-        if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
-        if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
-        
-        let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        let item = AVPlayerItem(asset: asset)
         setupPlayerWithItem(item)
     }
     
     private func setupPlayerWithItem(_ item: AVPlayerItem) {
         let p = AVPlayer(playerItem: item)
+        // Donmaları önlemek için akıcı oynatma tamponunu aç
+        p.automaticallyWaitsToMinimizeStalling = true
         self.player = p
         
         p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
-            if !isDraggingSlider {
+            if !isDraggingSlider && !isSeeking {
                 self.currentTime = time.seconds
                 if let dur = p.currentItem?.duration.seconds, !dur.isNaN {
                     self.totalDuration = dur
@@ -475,16 +482,43 @@ public struct CustomPlayerView: View {
         }
     }
     
+    // MARK: - DONMAYAN AKICI İLERİ/GERİ SARMA (Smooth Fast Keyframe Seeking)
     private func seekRelative(_ seconds: Double) {
         let target = max(0, min(totalDuration, currentTime + seconds))
-        seekTo(seconds: target)
+        currentTime = target
+        performSmoothSeek(to: target)
         resetControlsTimer()
     }
     
-    private func seekTo(seconds: Double) {
+    private func performSmoothSeek(to seconds: Double) {
+        guard let p = player else { return }
+        
+        // Eğer zaten arama yapılıyorsa en son hedefi kaydet ve bekle (debouncing)
+        if isSeeking {
+            pendingSeekTarget = seconds
+            return
+        }
+        
+        isSeeking = true
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
-        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentTime = seconds
+        
+        // DONMAYI ÖNLEYEN KRİTİK NOKTA:
+        // tolerance: .zero yerine en yakın I-Frame'e (Keyframe) hızlı atlama yapıyoruz.
+        // Bu sayede video asla donmaz, tamponu boşaltmaz ve anında o saniyeden oynamaya başlar!
+        let tolerance = CMTime(seconds: 2.0, preferredTimescale: 600)
+        p.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+            self.isSeeking = false
+            
+            // Peş peşe dokunulduysa son sıçramayı uygula
+            if let nextTarget = self.pendingSeekTarget {
+                self.pendingSeekTarget = nil
+                self.performSmoothSeek(to: nextTarget)
+            } else {
+                if self.isPlaying {
+                    p.play()
+                }
+            }
+        }
     }
     
     private func start2XSpeed() {
