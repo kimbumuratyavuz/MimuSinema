@@ -2,6 +2,8 @@ import SwiftUI
 
 public struct MainTabView: View {
     @ObservedObject private var dataManager = DataManagerService.shared
+    @ObservedObject private var updateService = AppUpdateService.shared
+    
     @State private var selectedTab: TabItemType = .home
     
     public init() {}
@@ -29,10 +31,19 @@ public struct MainTabView: View {
             .ignoresSafeArea(edges: .top)
             
             GlassmorphicTabBar(selectedTab: $selectedTab)
+            
+            // YENİ VERSİYON GÜNCELLEME PENCERESİ
+            if updateService.hasUpdate {
+                UpdateDialogView()
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             dataManager.fetchAllData()
+            // Açılışta Otomatik Versiyon Kontrolü
+            updateService.checkForUpdates()
         }
     }
 }
