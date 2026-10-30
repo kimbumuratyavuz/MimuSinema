@@ -1,6 +1,26 @@
 import SwiftUI
 import AVKit
 
+// MARK: - Global Orientation Manager
+public final class OrientationManager {
+    public static func forceOrientation(_ orientation: UIInterfaceOrientationMask) {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            if #available(iOS 16.0, *) {
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
+            } else {
+                let val: Int
+                switch orientation {
+                case .landscape, .landscapeRight: val = UIInterfaceOrientation.landscapeRight.rawValue
+                case .landscapeLeft: val = UIInterfaceOrientation.landscapeLeft.rawValue
+                default: val = UIInterfaceOrientation.portrait.rawValue
+                }
+                UIDevice.current.setValue(val, forKey: "orientation")
+                UIViewController.attemptRotationToDeviceOrientation()
+            }
+        }
+    }
+}
+
 public struct CustomPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     
@@ -192,7 +212,6 @@ public struct CustomPlayerView: View {
             resetControlsTimer()
         }
         .onDisappear {
-            // Kapatılırken dikey moda dönmesini sağla
             if isLandscapeMode {
                 OrientationManager.forceOrientation(.portrait)
             }
@@ -344,7 +363,6 @@ public struct CustomPlayerView: View {
         }
     }
     
-    // MARK: - Ekran Döndürme Fonksiyonu
     private func toggleOrientation() {
         isLandscapeMode.toggle()
         if isLandscapeMode {
@@ -354,8 +372,6 @@ public struct CustomPlayerView: View {
         }
         resetControlsTimer()
     }
-    
-    // MARK: - Oynatıcı Mantığı
     
     private func loadPlayer() {
         player?.pause()
