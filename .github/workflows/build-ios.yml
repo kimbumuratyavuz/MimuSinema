@@ -9,9 +9,17 @@ permissions:
   contents: write
 
 jobs:
+  test-runner:
+    name: Check Runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test
+        run: echo "Ubuntu runner works!"
+
   build:
     name: Build iOS IPA
-    runs-on: macos-14
+    runs-on: macos-latest
+    needs: test-runner
 
     steps:
       - name: Checkout Repository
@@ -19,7 +27,6 @@ jobs:
 
       - name: Set Xcode Version
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
@@ -65,6 +72,5 @@ jobs:
             🎉 **MimuSinema iOS IPA Hazır!**
             
             - **Kurulum:** İndirdiğiniz `MimuSinema.ipa` dosyasını Windows bilgisayarınızda **Sideloadly**, **AltStore** veya **TrollStore** kullanarak iPhone'unuza yükleyebilirsiniz.
-            - **Özellikler:** Netflix arayüzü, Glassmorphism tab menü, M3U akışları, 2x basılı tutma, ±5 sn çift tık ve offline indirme.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
