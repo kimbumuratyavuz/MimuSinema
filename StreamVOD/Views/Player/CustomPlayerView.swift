@@ -1,28 +1,6 @@
 import SwiftUI
 import AVKit
 
-// MARK: - Global Orientation Manager
-public class OrientationManager {
-    public static func forceOrientation(_ orientation: UIInterfaceOrientationMask) {
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            if #available(iOS 16.0, *) {
-                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { error in
-                    print("Orientation update error: \(error.localizedDescription)")
-                }
-            } else {
-                let val: Int
-                switch orientation {
-                case .landscape, .landscapeRight: val = UIInterfaceOrientation.landscapeRight.rawValue
-                case .landscapeLeft: val = UIInterfaceOrientation.landscapeLeft.rawValue
-                default: val = UIInterfaceOrientation.portrait.rawValue
-                }
-                UIDevice.current.setValue(val, forKey: "orientation")
-                UIViewController.attemptRotationToDeviceOrientation()
-            }
-        }
-    }
-}
-
 public struct CustomPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     
@@ -43,6 +21,9 @@ public struct CustomPlayerView: View {
     // Boyut (Aspect Ratio) Modu
     @State private var aspectModeIndex: Int = 0
     private let aspectModes = VideoAspectRatioMode.allCases
+    
+    // Manuel Yatay / Dikey Ekran Yönlendirmesi
+    @State private var isLandscapeMode: Bool = false
     
     // 2x Hız Durumu & Göstergeler
     @State private var is2XActive: Bool = false
@@ -79,7 +60,7 @@ public struct CustomPlayerView: View {
                     .scaleEffect(1.5)
             }
             
-            // 2. JEST KATMANI (DOKUNMA, ÇİFT TIKLAMA VE UZUN BASMA)
+            // 2. JEST KATMANI
             GeometryReader { geo in
                 HStack(spacing: 0) {
                     // SOL ALAN (-5 sn Sarma & Sol Basılı Tutma)
@@ -125,7 +106,7 @@ public struct CustomPlayerView: View {
             }
             .ignoresSafeArea()
             
-            // 3. JEST GÖRSEL BİLDİRİMLERİ (±5 SN & 2X)
+            // 3. JEST BİLDİRİMLERİ (±5 SN)
             HStack {
                 if showRewindFeedback {
                     VStack(spacing: 6) {
@@ -157,9 +138,9 @@ public struct CustomPlayerView: View {
                     .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 80)
+            .padding(.horizontal, 60)
             
-            // 2X HIZ ROZETİ (Üst Merkez)
+            // 2X HIZ ROZETİ
             if is2XActive {
                 VStack {
                     HStack(spacing: 6) {
@@ -173,13 +154,13 @@ public struct CustomPlayerView: View {
                     .padding(.vertical, 8)
                     .background(Color.red.opacity(0.9))
                     .clipShape(Capsule())
-                    .padding(.top, 30)
+                    .padding(.top, 40)
                     
                     Spacer()
                 }
             }
             
-            // 4. KONTROL KATMANI (Ön Planda, Butonlar Tıklanabilir)
+            // 4. KONTROL KATMANI
             if showControls {
                 VStack(spacing: 0) {
                     topBarView
@@ -207,14 +188,14 @@ public struct CustomPlayerView: View {
         }
         .statusBarHidden(true)
         .onAppear {
-            // Açıldığında Zorunlu Yatay (Landscape) Döndür
-            OrientationManager.forceOrientation(.landscapeRight)
             loadPlayer()
             resetControlsTimer()
         }
         .onDisappear {
-            // Kapatıldığında Dikey (Portrait) Moda Geri Dön
-            OrientationManager.forceOrientation(.portrait)
+            // Kapatılırken dikey moda dönmesini sağla
+            if isLandscapeMode {
+                OrientationManager.forceOrientation(.portrait)
+            }
             player?.pause()
             player = nil
             controlsTimer?.invalidate()
@@ -224,7 +205,7 @@ public struct CustomPlayerView: View {
     // MARK: - Kontrol Bileşenleri
     
     private var topBarView: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 12) {
             Button(action: {
                 dismiss()
             }) {
@@ -237,28 +218,33 @@ public struct CustomPlayerView: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(currentMedia.cleanTitle)
-                    .font(.headline)
+                    .font(.subheadline)
+                    .fontWeight(.bold)
                     .foregroundColor(.white)
                     .lineLimit(1)
                 
                 if let sName = currentMedia.seriesName {
                     Text(sName)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(.gray)
                 }
             }
             
             Spacer()
             
-            if currentMedia.audioType != .original {
-                Text(currentMedia.audioType.rawValue)
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(currentMedia.audioType == .dubbing ? Color.green : Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
+            // YATAY / DİKEY EKRAN DÖNDÜRME BUTONU
+            Button(action: toggleOrientation) {
+                HStack(spacing: 4) {
+                    Image(systemName: isLandscapeMode ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate")
+                        .font(.system(size: 13))
+                    Text(isLandscapeMode ? "Dikey" : "Yatay")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(isLandscapeMode ? Color.red : Color.white.opacity(0.25)))
             }
             
             // Boyut Değiştirme Butonu (Fit, Fill, Stretch)
@@ -276,12 +262,11 @@ public struct CustomPlayerView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.top, 20)
+        .padding(.top, 24)
     }
     
     private var centerControlsView: some View {
-        HStack(spacing: 60) {
-            // -10 sn Butonu
+        HStack(spacing: 50) {
             Button(action: {
                 seekRelative(-10)
                 resetControlsTimer()
@@ -291,14 +276,12 @@ public struct CustomPlayerView: View {
                     .foregroundColor(.white)
             }
             
-            // Oynat / Duraklat Butonu
             Button(action: togglePlayPause) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 68))
+                    .font(.system(size: 64))
                     .foregroundColor(.white)
             }
             
-            // +10 sn Butonu
             Button(action: {
                 seekRelative(10)
                 resetControlsTimer()
@@ -339,7 +322,6 @@ public struct CustomPlayerView: View {
                     .font(.caption)
                     .foregroundColor(.white)
                 
-                // Varsa Sonraki Bölüm Butonu
                 if hasNextEpisode {
                     Button(action: playNextEpisode) {
                         HStack(spacing: 4) {
@@ -358,8 +340,19 @@ public struct CustomPlayerView: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.bottom, 20)
+            .padding(.bottom, 24)
         }
+    }
+    
+    // MARK: - Ekran Döndürme Fonksiyonu
+    private func toggleOrientation() {
+        isLandscapeMode.toggle()
+        if isLandscapeMode {
+            OrientationManager.forceOrientation(.landscapeRight)
+        } else {
+            OrientationManager.forceOrientation(.portrait)
+        }
+        resetControlsTimer()
     }
     
     // MARK: - Oynatıcı Mantığı

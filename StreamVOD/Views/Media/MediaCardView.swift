@@ -13,10 +13,9 @@ public struct MediaCardView: View {
     }
     
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             // Poster Alanı
             ZStack(alignment: .topTrailing) {
-                // Hızlı Disk Cache Destekli Afiş
                 CachedAsyncImage(urlString: item.logoUrl) { image in
                     image
                         .resizable()
@@ -30,9 +29,10 @@ public struct MediaCardView: View {
                                 .foregroundColor(.gray.opacity(0.5))
                         )
                 }
-                .frame(height: 180)
+                .frame(height: 160)
+                .frame(maxWidth: .infinity)
                 .clipped()
-                .cornerRadius(10)
+                .cornerRadius(8)
                 
                 // Sol Üst: Favori Kalp Butonu
                 VStack {
@@ -41,12 +41,12 @@ public struct MediaCardView: View {
                             favoritesService.toggleFavorite(media: item)
                         }) {
                             Image(systemName: isFav ? "heart.fill" : "heart")
-                                .font(.system(size: 15))
+                                .font(.system(size: 13))
                                 .foregroundColor(isFav ? .red : .white)
-                                .padding(6)
+                                .padding(5)
                                 .background(Circle().fill(Color.black.opacity(0.65)))
                         }
-                        .padding(6)
+                        .padding(5)
                         
                         Spacer()
                     }
@@ -56,51 +56,48 @@ public struct MediaCardView: View {
                 // Sağ Üst: Dublaj / Altyazı Rozeti
                 if item.audioType != .original {
                     Text(item.audioType.rawValue)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
                         .background(item.audioType == .dubbing ? Color.green : Color.blue)
                         .cornerRadius(4)
-                        .padding(6)
+                        .padding(5)
                 }
             }
-            .frame(height: 180)
+            .frame(height: 160)
             
             // Başlık & Kategori
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(item.cleanTitle)
-                    .font(.caption)
+                    .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                     .lineLimit(1)
                 
                 Text(item.groupTitle)
-                    .font(.system(size: 10))
+                    .font(.system(size: 9))
                     .foregroundColor(.gray)
                     .lineLimit(1)
             }
-            .frame(height: 32, alignment: .topLeading)
+            .frame(height: 28, alignment: .topLeading)
             
             // Kartın Altındaki "İzle" ve "İndir" Butonları
-            HStack(spacing: 6) {
-                // İZLE BUTONU
+            HStack(spacing: 4) {
                 Button(action: onPlay) {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 9))
+                            .font(.system(size: 8))
                         Text("İzle")
-                            .font(.caption2)
-                            .fontWeight(.bold)
+                            .font(.system(size: 10, weight: .bold))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 5)
                     .background(Color.red)
                     .foregroundColor(.white)
-                    .cornerRadius(6)
+                    .cornerRadius(5)
                 }
                 
-                // İNDİR BUTONU
                 Button(action: {
                     onDownload()
                     withAnimation { isAddedToQueue = true }
@@ -108,21 +105,20 @@ public struct MediaCardView: View {
                         withAnimation { isAddedToQueue = false }
                     }
                 }) {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         Image(systemName: isAddedToQueue ? "checkmark" : "arrow.down")
-                            .font(.system(size: 9))
+                            .font(.system(size: 8))
                         Text(isAddedToQueue ? "Eklendi" : "İndir")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
+                            .font(.system(size: 10, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 5)
                     .background(isAddedToQueue ? Color.green.opacity(0.8) : Color.white.opacity(0.15))
                     .foregroundColor(.white)
-                    .cornerRadius(6)
+                    .cornerRadius(5)
                 }
             }
         }
-        .frame(width: 135)
+        .frame(maxWidth: .infinity)
     }
 }

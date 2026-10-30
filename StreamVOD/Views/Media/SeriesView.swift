@@ -8,7 +8,6 @@ public struct SeriesDetailView: View {
     @State private var selectedAudioFilter: AudioLanguageType = .all
     @State private var playingIndex: Int? = nil
     
-    // O sezonun filtrelenmiş bölümleri
     private var currentSeasonEpisodes: [MediaItem] {
         let eps = series.seasons[selectedSeason] ?? series.episodes
         return eps.filter { item in
@@ -23,23 +22,19 @@ public struct SeriesDetailView: View {
     
     public var body: some View {
         ZStack {
-            Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea()
+            Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    // Dizi Başlık ve Kapak Alanı
                     HStack(spacing: 14) {
-                        if let logo = series.logoUrl, let url = URL(string: logo) {
-                            AsyncImage(url: url) { phase in
-                                if let img = phase.image {
-                                    img.resizable().aspectRatio(contentMode: .fill)
-                                } else {
-                                    Rectangle().fill(Color.gray.opacity(0.3))
-                                }
-                            }
-                            .frame(width: 90, height: 130)
-                            .cornerRadius(8)
+                        CachedAsyncImage(urlString: series.logoUrl) { img in
+                            img.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(Color.gray.opacity(0.2))
                         }
+                        .frame(width: 90, height: 130)
+                        .cornerRadius(8)
+                        .clipped()
                         
                         VStack(alignment: .leading, spacing: 6) {
                             Text(series.name)
@@ -68,7 +63,7 @@ public struct SeriesDetailView: View {
                     }
                     .padding(.horizontal)
                     
-                    // SEZON SEÇİCİ (Sezon 1, Sezon 2, ...)
+                    // SEZON SEÇİCİ
                     if series.sortedSeasonKeys.count > 1 {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("SEZON SEÇİN")
@@ -86,8 +81,8 @@ public struct SeriesDetailView: View {
                                             Text(seasonKey)
                                                 .font(.subheadline)
                                                 .fontWeight(selectedSeason == seasonKey ? .bold : .medium)
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 8)
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 7)
                                                 .background(selectedSeason == seasonKey ? Color.red : Color.white.opacity(0.12))
                                                 .foregroundColor(.white)
                                                 .cornerRadius(8)
@@ -123,7 +118,6 @@ public struct SeriesDetailView: View {
                     LazyVStack(spacing: 8) {
                         ForEach(Array(currentSeasonEpisodes.enumerated()), id: \.element.id) { index, ep in
                             HStack(spacing: 12) {
-                                // İZLE BUTONU (Oynatıcıyı açar)
                                 Button(action: {
                                     if let originalIndex = series.episodes.firstIndex(where: { $0.id == ep.id }) {
                                         playingIndex = originalIndex
@@ -163,7 +157,6 @@ public struct SeriesDetailView: View {
                                 
                                 Spacer()
                                 
-                                // İNDİR BUTONU
                                 Button(action: {
                                     downloadManager.addToQueue(media: ep)
                                 }) {
@@ -197,7 +190,6 @@ public struct SeriesDetailView: View {
             set: { if !$0 { playingIndex = nil } }
         )) {
             if let idx = playingIndex {
-                // Dizinin tüm bölümlerini veriyoruz; geri çıkınca doğrudan buraya döner
                 CustomPlayerView(mediaList: series.episodes, initialIndex: idx)
             }
         }
@@ -212,7 +204,6 @@ public struct SeriesDetailView: View {
 
 public struct SeriesView: View {
     @ObservedObject private var dataManager = DataManagerService.shared
-    @ObservedObject private var favoritesService = FavoritesService.shared
     @ObservedObject private var downloadManager = DownloadManagerService.shared
     
     @State private var searchText: String = ""
@@ -226,19 +217,22 @@ public struct SeriesView: View {
         }
     }
     
-    private let columns = [
-        GridItem(.adaptive(minimum: 120, maximum: 150), spacing: 14)
+    // Sağ ve soldaki boşlukları kaldıran tam oturan 3 sütunlu grid
+    private let gridColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
     ]
     
     public var body: some View {
         NavigationView {
             ZStack {
-                Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea()
+                Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
                 
                 if dataManager.isLoadingSeries && dataManager.visibleSeries.isEmpty {
                     VStack(spacing: 12) {
-                        ProgressView("Diziler yükleniyor (50'şer)...")
-                            .tint(.white)
+                        ProgressView("Diziler yükleniyor...")
+                            .tint(.red)
                             .foregroundColor(.white)
                     }
                 } else if filteredSeries.isEmpty {
@@ -246,69 +240,50 @@ public struct SeriesView: View {
                         .foregroundColor(.gray)
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
+                        LazyVGrid(columns: gridColumns, spacing: 14) {
                             ForEach(filteredSeries) { group in
                                 NavigationLink(destination: SeriesDetailView(series: group)) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        // Kapak & Rozetler
-                                        ZStack(alignment: .topTrailing) {
-                                            if let logo = group.logoUrl, let url = URL(string: logo) {
-                                                AsyncImage(url: url) { phase in
-                                                    if let img = phase.image {
-                                                        img.resizable().aspectRatio(contentMode: .fill)
-                                                    } else {
-                                                        Rectangle().fill(Color.gray.opacity(0.3))
-                                                    }
-                                                }
-                                                .frame(height: 170)
-                                                .cornerRadius(8)
-                                            } else {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        ZStack(alignment: .bottomTrailing) {
+                                            CachedAsyncImage(urlString: group.logoUrl) { img in
+                                                img.resizable().aspectRatio(contentMode: .fill)
+                                            } placeholder: {
                                                 Rectangle()
-                                                    .fill(Color.gray.opacity(0.2))
-                                                    .frame(height: 170)
-                                                    .overlay(Image(systemName: "tv").foregroundColor(.gray))
-                                                    .cornerRadius(8)
+                                                    .fill(Color.gray.opacity(0.18))
+                                                    .overlay(Image(systemName: "tv").foregroundColor(.gray.opacity(0.5)))
                                             }
+                                            .frame(height: 160)
+                                            .frame(maxWidth: .infinity)
+                                            .cornerRadius(8)
+                                            .clipped()
                                             
-                                            // Bölüm Sayısı Rozeti
-                                            VStack {
-                                                Spacer()
-                                                HStack {
-                                                    Spacer()
-                                                    Text("\(group.episodes.count) Bölüm")
-                                                        .font(.caption2)
-                                                        .fontWeight(.bold)
-                                                        .foregroundColor(.white)
-                                                        .padding(4)
-                                                        .background(Color.black.opacity(0.75))
-                                                        .cornerRadius(4)
-                                                        .padding(6)
-                                                }
-                                            }
+                                            Text("\(group.episodes.count) Bölüm")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .padding(3)
+                                                .background(Color.black.opacity(0.75))
+                                                .cornerRadius(4)
+                                                .padding(4)
                                         }
-                                        .frame(height: 170)
+                                        .frame(height: 160)
                                         
                                         Text(group.name)
-                                            .font(.caption)
+                                            .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.white)
                                             .lineLimit(1)
                                         
-                                        // Kartın Altındaki "İzle (Bölümler)" Butonu
-                                        HStack(spacing: 4) {
-                                            HStack(spacing: 3) {
-                                                Image(systemName: "play.fill")
-                                                    .font(.system(size: 9))
-                                                Text("İzle / Sezonlar")
-                                                    .font(.caption2)
-                                                    .fontWeight(.bold)
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 6)
-                                            .background(Color.red)
-                                            .foregroundColor(.white)
-                                            .cornerRadius(6)
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "play.fill")
+                                                .font(.system(size: 8))
+                                            Text("İzle / Sezon")
+                                                .font(.system(size: 10, weight: .bold))
                                         }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 5)
+                                        .background(Color.red)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(6)
                                     }
                                 }
                                 .buttonStyle(.plain)
@@ -319,7 +294,8 @@ public struct SeriesView: View {
                                 }
                             }
                         }
-                        .padding()
+                        .padding(.horizontal, 10)
+                        .padding(.top, 6)
                         
                         if dataManager.hasMoreSeries {
                             ProgressView()
@@ -329,6 +305,8 @@ public struct SeriesView: View {
                                     dataManager.loadMoreSeries()
                                 }
                         }
+                        
+                        Spacer().frame(height: 85)
                     }
                 }
             }
