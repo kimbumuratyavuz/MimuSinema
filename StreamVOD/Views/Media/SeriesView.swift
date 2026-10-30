@@ -3,10 +3,15 @@ import SwiftUI
 public struct SeriesDetailView: View {
     public let series: SeriesGroup
     @ObservedObject private var downloadManager = DownloadManagerService.shared
+    @ObservedObject private var favoritesService = FavoritesService.shared
     
     @State private var selectedSeason: String = ""
     @State private var selectedAudioFilter: AudioLanguageType = .all
     @State private var playingIndex: Int? = nil
+    
+    private var isSeriesFav: Bool {
+        favoritesService.isSeriesFavorite(seriesName: series.name)
+    }
     
     private var currentSeasonEpisodes: [MediaItem] {
         let eps = series.seasons[selectedSeason] ?? series.episodes
@@ -46,18 +51,39 @@ public struct SeriesDetailView: View {
                                 .font(.caption)
                                 .foregroundColor(.gray)
                             
-                            Button(action: addSeasonToQueue) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.down.to.line.circle")
-                                    Text("Bu Sezonu İndir")
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
+                            HStack(spacing: 8) {
+                                // FAVORİ EKLE BUTONU
+                                Button(action: {
+                                    favoritesService.toggleSeriesFavorite(series: series)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: isSeriesFav ? "heart.fill" : "heart")
+                                            .font(.caption2)
+                                        Text(isSeriesFav ? "Listemde" : "Listeme Ekle")
+                                            .font(.caption2)
+                                            .fontWeight(.bold)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(isSeriesFav ? Color.white.opacity(0.2) : Color.white.opacity(0.12))
+                                    .foregroundColor(isSeriesFav ? .red : .white)
+                                    .cornerRadius(6)
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.red)
-                                .foregroundColor(.white)
-                                .cornerRadius(6)
+                                
+                                // BU SEZONU İNDİR BUTONU
+                                Button(action: addSeasonToQueue) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.down.to.line.circle")
+                                        Text("Sezonu İndir")
+                                            .font(.caption2)
+                                            .fontWeight(.bold)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.red)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(6)
+                                }
                             }
                         }
                     }
@@ -204,6 +230,7 @@ public struct SeriesDetailView: View {
 
 public struct SeriesView: View {
     @ObservedObject private var dataManager = DataManagerService.shared
+    @ObservedObject private var favoritesService = FavoritesService.shared
     @ObservedObject private var downloadManager = DownloadManagerService.shared
     
     @State private var searchText: String = ""
@@ -217,7 +244,6 @@ public struct SeriesView: View {
         }
     }
     
-    // Sağ ve soldaki boşlukları kaldıran tam oturan 3 sütunlu grid
     private let gridColumns = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10),
@@ -242,9 +268,12 @@ public struct SeriesView: View {
                     ScrollView {
                         LazyVGrid(columns: gridColumns, spacing: 14) {
                             ForEach(filteredSeries) { group in
+                                let isFav = favoritesService.isSeriesFavorite(seriesName: group.name)
+                                
                                 NavigationLink(destination: SeriesDetailView(series: group)) {
                                     VStack(alignment: .leading, spacing: 5) {
-                                        ZStack(alignment: .bottomTrailing) {
+                                        ZStack(alignment: .topLeading) {
+                                            // Dizi Afişi
                                             CachedAsyncImage(urlString: group.logoUrl) { img in
                                                 img.resizable().aspectRatio(contentMode: .fill)
                                             } placeholder: {
@@ -257,13 +286,33 @@ public struct SeriesView: View {
                                             .cornerRadius(8)
                                             .clipped()
                                             
-                                            Text("\(group.episodes.count) Bölüm")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.white)
-                                                .padding(3)
-                                                .background(Color.black.opacity(0.75))
-                                                .cornerRadius(4)
-                                                .padding(4)
+                                            // SOL ÜST: DİZİ FAVORİ (KALP) BUTONU
+                                            Button(action: {
+                                                favoritesService.toggleSeriesFavorite(series: group)
+                                            }) {
+                                                Image(systemName: isFav ? "heart.fill" : "heart")
+                                                    .font(.system(size: 13))
+                                                    .foregroundColor(isFav ? .red : .white)
+                                                    .padding(5)
+                                                    .background(Circle().fill(Color.black.opacity(0.65)))
+                                            }
+                                            .padding(5)
+                                            .buttonStyle(.plain)
+                                            
+                                            // SAĞ ALT: BÖLÜM SAYISI ROZETİ
+                                            VStack {
+                                                Spacer()
+                                                HStack {
+                                                    Spacer()
+                                                    Text("\(group.episodes.count) Bölüm")
+                                                        .font(.system(size: 9, weight: .bold))
+                                                        .foregroundColor(.white)
+                                                        .padding(3)
+                                                        .background(Color.black.opacity(0.75))
+                                                        .cornerRadius(4)
+                                                        .padding(4)
+                                                }
+                                            }
                                         }
                                         .frame(height: 160)
                                         

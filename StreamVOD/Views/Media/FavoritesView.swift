@@ -3,9 +3,11 @@ import SwiftUI
 public struct FavoritesView: View {
     @ObservedObject private var favoritesService = FavoritesService.shared
     @ObservedObject private var downloadManager = DownloadManagerService.shared
+    @ObservedObject private var dataManager = DataManagerService.shared
     
     @State private var filterIndex: Int = 0 // 0: Tümü, 1: Filmler, 2: Diziler
     @State private var playingItem: MediaItem? = nil
+    @State private var selectedSeriesGroup: SeriesGroup? = nil
     
     private var filteredItems: [MediaItem] {
         favoritesService.favoriteItems.filter { item in
@@ -15,7 +17,6 @@ public struct FavoritesView: View {
         }
     }
     
-    // Sağ ve sol boşlukları sıfırlayan 3 sütunlu esnek ızgara
     private let gridColumns = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10),
@@ -28,7 +29,6 @@ public struct FavoritesView: View {
                 Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Filtreleme Segmenti
                     Picker("Filtre", selection: $filterIndex) {
                         Text("Tümü (\(favoritesService.favoriteItems.count))").tag(0)
                         Text("Filmler").tag(1)
@@ -47,7 +47,18 @@ public struct FavoritesView: View {
                                     MediaCardView(
                                         item: item,
                                         onPlay: {
-                                            playingItem = item
+                                            if item.isSeries {
+                                                // Dizi ise Sezon & Bölüm detayını aç
+                                                let sName = item.seriesName ?? item.cleanTitle
+                                                if let found = dataManager.visibleSeries.first(where: { $0.name == sName }) {
+                                                    selectedSeriesGroup = found
+                                                } else {
+                                                    selectedSeriesGroup = SeriesGroup(name: sName, logoUrl: item.logoUrl, episodes: [item])
+                                                }
+                                            } else {
+                                                // Film ise doğrudan oynat
+                                                playingItem = item
+                                            }
                                         },
                                         onDownload: {
                                             downloadManager.addToQueue(media: item)
@@ -67,6 +78,19 @@ public struct FavoritesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $playingItem) { item in
                 CustomPlayerView(mediaList: [item], initialIndex: 0)
+            }
+            .sheet(item: $selectedSeriesGroup) { group in
+                NavigationView {
+                    SeriesDetailView(series: group)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Kapat") {
+                                    selectedSeriesGroup = nil
+                                }
+                                .foregroundColor(.white)
+                            }
+                        }
+                }
             }
         }
     }
