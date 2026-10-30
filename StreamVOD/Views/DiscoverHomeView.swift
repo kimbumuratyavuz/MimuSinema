@@ -51,10 +51,11 @@ public struct DiscoverHomeView: View {
                             )
                             
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 14) {
+                                LazyHStack(spacing: 12) {
                                     ForEach(dataManager.visibleMovies.prefix(15)) { movie in
                                         MediaCardView(
                                             item: movie,
+                                            cardWidth: 130,
                                             onPlay: {
                                                 playingMovie = movie
                                             },
@@ -78,13 +79,15 @@ public struct DiscoverHomeView: View {
                             )
                             
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 14) {
+                                LazyHStack(spacing: 12) {
                                     ForEach(dataManager.visibleSeries.prefix(15)) { group in
+                                        let isFav = favoritesService.isSeriesFavorite(seriesName: group.name)
+                                        
                                         Button(action: {
                                             selectedSeries = group
                                         }) {
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                ZStack(alignment: .bottomTrailing) {
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                ZStack(alignment: .topLeading) {
                                                     CachedAsyncImage(urlString: group.logoUrl) { img in
                                                         img.resizable().aspectRatio(contentMode: .fill)
                                                     } placeholder: {
@@ -92,38 +95,58 @@ public struct DiscoverHomeView: View {
                                                             .fill(Color.gray.opacity(0.18))
                                                             .overlay(Image(systemName: "tv").foregroundColor(.gray.opacity(0.5)))
                                                     }
-                                                    .frame(width: 135, height: 180)
+                                                    .frame(width: 130, height: 175)
                                                     .cornerRadius(8)
                                                     .clipped()
                                                     
-                                                    Text("\(group.episodes.count) Bölüm")
-                                                        .font(.system(size: 9, weight: .bold))
-                                                        .foregroundColor(.white)
-                                                        .padding(3)
-                                                        .background(Color.black.opacity(0.75))
-                                                        .cornerRadius(4)
-                                                        .padding(5)
+                                                    // Sol Üst Kalp Butonu
+                                                    Button(action: {
+                                                        favoritesService.toggleSeriesFavorite(series: group)
+                                                    }) {
+                                                        Image(systemName: isFav ? "heart.fill" : "heart")
+                                                            .font(.system(size: 13))
+                                                            .foregroundColor(isFav ? .red : .white)
+                                                            .padding(5)
+                                                            .background(Circle().fill(Color.black.opacity(0.65)))
+                                                    }
+                                                    .padding(5)
+                                                    .buttonStyle(.plain)
+                                                    
+                                                    // Sağ Alt Bölüm Sayısı
+                                                    VStack {
+                                                        Spacer()
+                                                        HStack {
+                                                            Spacer()
+                                                            Text("\(group.episodes.count) Bölüm")
+                                                                .font(.system(size: 9, weight: .bold))
+                                                                .foregroundColor(.white)
+                                                                .padding(3)
+                                                                .background(Color.black.opacity(0.75))
+                                                                .cornerRadius(4)
+                                                                .padding(4)
+                                                        }
+                                                    }
                                                 }
+                                                .frame(width: 130, height: 175)
                                                 
                                                 Text(group.name)
-                                                    .font(.caption)
+                                                    .font(.caption2)
                                                     .fontWeight(.bold)
                                                     .foregroundColor(.white)
                                                     .lineLimit(1)
-                                                    .frame(width: 135, alignment: .leading)
+                                                    .frame(width: 130, alignment: .leading)
                                                 
                                                 HStack(spacing: 3) {
                                                     Image(systemName: "play.fill")
-                                                        .font(.system(size: 9))
+                                                        .font(.system(size: 8))
                                                     Text("İzle / Sezonlar")
-                                                        .font(.caption2)
-                                                        .fontWeight(.bold)
+                                                        .font(.system(size: 10, weight: .bold))
                                                 }
-                                                .frame(width: 135)
+                                                .frame(width: 130)
                                                 .padding(.vertical, 5)
                                                 .background(Color.red)
                                                 .foregroundColor(.white)
-                                                .cornerRadius(6)
+                                                .cornerRadius(5)
                                             }
                                         }
                                         .buttonStyle(.plain)

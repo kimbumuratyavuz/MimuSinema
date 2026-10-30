@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct MediaCardView: View {
     public let item: MediaItem
+    public var fixedWidth: CGFloat? = nil
     public var onPlay: () -> Void
     public var onDownload: () -> Void
     
@@ -14,6 +15,18 @@ public struct MediaCardView: View {
     
     private var isAlreadyQueuedOrDownloaded: Bool {
         downloadManager.isItemQueued(media: item)
+    }
+    
+    public init(
+        item: MediaItem,
+        fixedWidth: CGFloat? = nil,
+        onPlay: @escaping () -> Void,
+        onDownload: @escaping () -> Void
+    ) {
+        self.item = item
+        self.fixedWidth = fixedWidth
+        self.onPlay = onPlay
+        self.onDownload = onDownload
     }
     
     public var body: some View {
@@ -33,8 +46,8 @@ public struct MediaCardView: View {
                                 .foregroundColor(.gray.opacity(0.5))
                         )
                 }
-                .frame(height: 160)
-                .frame(maxWidth: .infinity)
+                .frame(height: 170)
+                .frame(maxWidth: fixedWidth ?? .infinity)
                 .clipped()
                 .cornerRadius(8)
                 
@@ -69,20 +82,22 @@ public struct MediaCardView: View {
                         .padding(5)
                 }
             }
-            .frame(height: 160)
+            .frame(height: 170)
             
-            // Başlık & Kategori
+            // Başlık & Kategori (Genişlik Kilitli, Yatayda Kartı Asla Esnetemez)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.cleanTitle)
                     .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 
                 Text(item.groupTitle)
                     .font(.system(size: 9))
                     .foregroundColor(.gray)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .frame(height: 28, alignment: .topLeading)
             
@@ -102,7 +117,6 @@ public struct MediaCardView: View {
                     .cornerRadius(5)
                 }
                 
-                // İNDİR BUTONU (KUYRUKTAYSA PASİF VE ONAYLI)
                 Button(action: {
                     if !isAlreadyQueuedOrDownloaded {
                         onDownload()
@@ -120,9 +134,10 @@ public struct MediaCardView: View {
                     .foregroundColor(isAlreadyQueuedOrDownloaded ? Color.green : Color.white)
                     .cornerRadius(5)
                 }
-                .disabled(isAlreadyQueuedOrDownloaded) // KUYRUKTAYSA PASİF
+                .disabled(isAlreadyQueuedOrDownloaded)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: fixedWidth)
+        .frame(maxWidth: fixedWidth == nil ? .infinity : nil)
     }
 }
