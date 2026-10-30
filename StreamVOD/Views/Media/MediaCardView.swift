@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct MediaCardView: View {
     public let item: MediaItem
-    public var fixedWidth: CGFloat? = nil
+    public var cardWidth: CGFloat? = nil
     public var onPlay: () -> Void
     public var onDownload: () -> Void
     
@@ -19,12 +19,12 @@ public struct MediaCardView: View {
     
     public init(
         item: MediaItem,
-        fixedWidth: CGFloat? = nil,
+        cardWidth: CGFloat? = nil,
         onPlay: @escaping () -> Void,
         onDownload: @escaping () -> Void
     ) {
         self.item = item
-        self.fixedWidth = fixedWidth
+        self.cardWidth = cardWidth
         self.onPlay = onPlay
         self.onDownload = onDownload
     }
@@ -47,7 +47,7 @@ public struct MediaCardView: View {
                         )
                 }
                 .frame(height: 170)
-                .frame(maxWidth: fixedWidth ?? .infinity)
+                .frame(maxWidth: cardWidth ?? .infinity)
                 .clipped()
                 .cornerRadius(8)
                 
@@ -84,7 +84,7 @@ public struct MediaCardView: View {
             }
             .frame(height: 170)
             
-            // Başlık & Kategori (Genişlik Kilitli, Yatayda Kartı Asla Esnetemez)
+            // Başlık & Kategori (Genişlik Kilitli)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.cleanTitle)
                     .font(.caption2)
@@ -137,7 +137,7 @@ public struct MediaCardView: View {
                 .disabled(isAlreadyQueuedOrDownloaded)
             }
         }
-        .frame(width: fixedWidth)
-        .frame(maxWidth: fixedWidth == nil ? .infinity : nil)
+        .frame(width: cardWidth)
+        .frame(maxWidth: cardWidth == nil ? .infinity : nil)
     }
 }
