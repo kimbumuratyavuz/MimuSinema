@@ -1,6 +1,28 @@
 import SwiftUI
 import AVKit
 
+// MARK: - Global Orientation Manager
+public class OrientationManager {
+    public static func forceOrientation(_ orientation: UIInterfaceOrientationMask) {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            if #available(iOS 16.0, *) {
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { error in
+                    print("Orientation update error: \(error.localizedDescription)")
+                }
+            } else {
+                let val: Int
+                switch orientation {
+                case .landscape, .landscapeRight: val = UIInterfaceOrientation.landscapeRight.rawValue
+                case .landscapeLeft: val = UIInterfaceOrientation.landscapeLeft.rawValue
+                default: val = UIInterfaceOrientation.portrait.rawValue
+                }
+                UIDevice.current.setValue(val, forKey: "orientation")
+                UIViewController.attemptRotationToDeviceOrientation()
+            }
+        }
+    }
+}
+
 public struct CustomPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     
@@ -13,17 +35,17 @@ public struct CustomPlayerView: View {
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
     
-    // Süre & İlerleme
+    // Süre
     @State private var currentTime: Double = 0
     @State private var totalDuration: Double = 0
     @State private var isDraggingSlider: Bool = false
     
-    // Ekran Boyutu Modu
+    // Boyut (Aspect Ratio) Modu
     @State private var aspectModeIndex: Int = 0
     private let aspectModes = VideoAspectRatioMode.allCases
     
-    // 2x Hız & Çift Dokunma Göstergeleri
-    @State private var isFastForwarding: Bool = false
+    // 2x Hız Durumu & Göstergeler
+    @State private var is2XActive: Bool = false
     @State private var showForwardFeedback: Bool = false
     @State private var showRewindFeedback: Bool = false
     
@@ -44,7 +66,7 @@ public struct CustomPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // 1. Video Yansıtıcı
+            // 1. VİDEO YANSITICI
             if let player = player {
                 AVPlayerCustomRepresentable(
                     player: player,
@@ -57,62 +79,64 @@ public struct CustomPlayerView: View {
                     .scaleEffect(1.5)
             }
             
-            // 2. Çift Dokunma & Uzun Basma Algılama Bölgeleri (Sol & Sağ)
-            HStack(spacing: 0) {
-                // SOL YARI (Geri Sarma -5sn & 2x)
-                Color.black.opacity(0.001)
-                    .onTapGesture(count: 2) {
-                        seekRelative(-5)
-                        triggerRewindFeedback()
-                    }
-                    .onTapGesture(count: 1) {
-                        toggleControls()
-                    }
-                    .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.3)
-                            .onChanged { _ in
-                                start2XSpeed()
-                            }
-                    )
-                
-                // SAĞ YARI (İleri Sarma +5sn & 2x)
-                Color.black.opacity(0.001)
-                    .onTapGesture(count: 2) {
-                        seekRelative(5)
-                        triggerForwardFeedback()
-                    }
-                    .onTapGesture(count: 1) {
-                        toggleControls()
-                    }
-                    .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.3)
-                            .onChanged { _ in
-                                start2XSpeed()
-                            }
-                    )
-            }
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .onEnded { _ in
-                        if isFastForwarding {
-                            stop2XSpeed()
+            // 2. JEST KATMANI (DOKUNMA, ÇİFT TIKLAMA VE UZUN BASMA)
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    // SOL ALAN (-5 sn Sarma & Sol Basılı Tutma)
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            seekRelative(-5)
+                            triggerRewindFeedback()
                         }
-                    }
-            )
+                        .onTapGesture(count: 1) {
+                            handleSingleTap()
+                        }
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.6)
+                                .onChanged { _ in
+                                    start2XSpeed()
+                                }
+                                .onEnded { _ in
+                                    stop2XSpeed()
+                                }
+                        )
+                    
+                    // SAĞ ALAN (+5 sn Sarma & Sağ Basılı Tutma)
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            seekRelative(5)
+                            triggerForwardFeedback()
+                        }
+                        .onTapGesture(count: 1) {
+                            handleSingleTap()
+                        }
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.6)
+                                .onChanged { _ in
+                                    start2XSpeed()
+                                }
+                                .onEnded { _ in
+                                    stop2XSpeed()
+                                }
+                        )
+                }
+            }
             .ignoresSafeArea()
             
-            // 3. Jest Görsel Geribildirimleri (+5sn, -5sn, 2x)
+            // 3. JEST GÖRSEL BİLDİRİMLERİ (±5 SN & 2X)
             HStack {
                 if showRewindFeedback {
-                    VStack {
+                    VStack(spacing: 6) {
                         Image(systemName: "gobackward.5")
-                            .font(.system(size: 40, weight: .bold))
+                            .font(.system(size: 38, weight: .bold))
                         Text("-5 sn")
                             .font(.headline)
                     }
                     .foregroundColor(.white)
-                    .padding(20)
-                    .background(Color.black.opacity(0.6))
+                    .padding(18)
+                    .background(Color.black.opacity(0.65))
                     .cornerRadius(12)
                     .transition(.opacity)
                 }
@@ -120,92 +144,94 @@ public struct CustomPlayerView: View {
                 Spacer()
                 
                 if showForwardFeedback {
-                    VStack {
+                    VStack(spacing: 6) {
                         Image(systemName: "goforward.5")
-                            .font(.system(size: 40, weight: .bold))
+                            .font(.system(size: 38, weight: .bold))
                         Text("+5 sn")
                             .font(.headline)
                     }
                     .foregroundColor(.white)
-                    .padding(20)
-                    .background(Color.black.opacity(0.6))
+                    .padding(18)
+                    .background(Color.black.opacity(0.65))
                     .cornerRadius(12)
                     .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 60)
+            .padding(.horizontal, 80)
             
-            // 2x Hız Rozeti (Üst Merkez)
-            if isFastForwarding {
+            // 2X HIZ ROZETİ (Üst Merkez)
+            if is2XActive {
                 VStack {
                     HStack(spacing: 6) {
                         Image(systemName: "forward.fill")
-                        Text("2X OYNATILIYOR")
+                        Text("2X HIZLI OYNATILIYOR")
                             .font(.caption)
-                            .fontWeight(.bold)
+                            .fontWeight(.black)
                     }
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.85))
+                    .background(Color.red.opacity(0.9))
                     .clipShape(Capsule())
-                    .padding(.top, 40)
+                    .padding(.top, 30)
                     
                     Spacer()
                 }
             }
             
-            // 4. Kontrol Katmanı
+            // 4. KONTROL KATMANI (Ön Planda, Butonlar Tıklanabilir)
             if showControls {
                 VStack(spacing: 0) {
-                    // ÜST BAR: Geri, Başlık, Boyut Butonu
-                    topBar
+                    topBarView
                     
                     Spacer()
                     
-                    // MERKEZ: Oynat/Duraklat & Varsa Sonraki Bölüm
-                    centerControls
+                    centerControlsView
                     
                     Spacer()
                     
-                    // ALT BAR: Zaman, Slider, Sonraki Bölüm Kısayolu
-                    bottomBar
+                    bottomBarView
                 }
                 .padding()
                 .background(
                     LinearGradient(
-                        colors: [Color.black.opacity(0.8), Color.clear, Color.black.opacity(0.85)],
+                        colors: [Color.black.opacity(0.85), Color.clear, Color.black.opacity(0.88)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
                 .ignoresSafeArea()
                 .transition(.opacity)
+                .zIndex(10)
             }
         }
         .statusBarHidden(true)
         .onAppear {
-            setLandscapeOrientation(true)
+            // Açıldığında Zorunlu Yatay (Landscape) Döndür
+            OrientationManager.forceOrientation(.landscapeRight)
             loadPlayer()
             resetControlsTimer()
         }
         .onDisappear {
-            setLandscapeOrientation(false)
+            // Kapatıldığında Dikey (Portrait) Moda Geri Dön
+            OrientationManager.forceOrientation(.portrait)
             player?.pause()
             player = nil
             controlsTimer?.invalidate()
         }
     }
     
-    // MARK: - Alt Görünümler
+    // MARK: - Kontrol Bileşenleri
     
-    private var topBar: some View {
-        HStack(alignment: .center, spacing: 16) {
-            Button(action: { dismiss() }) {
+    private var topBarView: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Button(action: {
+                dismiss()
+            }) {
                 Image(systemName: "chevron.left")
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundColor(.white)
-                    .padding(8)
+                    .padding(10)
                     .background(Circle().fill(Color.white.opacity(0.2)))
             }
             
@@ -224,7 +250,6 @@ public struct CustomPlayerView: View {
             
             Spacer()
             
-            // Dublaj / Altyazı Rozeti
             if currentMedia.audioType != .original {
                 Text(currentMedia.audioType.rawValue)
                     .font(.caption2)
@@ -236,51 +261,58 @@ public struct CustomPlayerView: View {
                     .cornerRadius(4)
             }
             
-            // Video En/Boy Boyut Değiştirici Buton
+            // Boyut Değiştirme Butonu (Fit, Fill, Stretch)
             Button(action: cycleAspectRatio) {
                 HStack(spacing: 4) {
                     Image(systemName: aspectModes[aspectModeIndex].icon)
                     Text(aspectModes[aspectModeIndex].rawValue)
                         .font(.caption2)
+                        .fontWeight(.bold)
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.2)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.25)))
             }
         }
         .padding(.horizontal)
-        .padding(.top, 24)
+        .padding(.top, 20)
     }
     
-    private var centerControls: some View {
-        HStack(spacing: 50) {
-            // -10 sn sarma butonu
-            Button(action: { seekRelative(-10); resetControlsTimer() }) {
+    private var centerControlsView: some View {
+        HStack(spacing: 60) {
+            // -10 sn Butonu
+            Button(action: {
+                seekRelative(-10)
+                resetControlsTimer()
+            }) {
                 Image(systemName: "gobackward.10")
-                    .font(.system(size: 32))
+                    .font(.system(size: 34))
                     .foregroundColor(.white)
             }
             
-            // Oynat / Duraklat
+            // Oynat / Duraklat Butonu
             Button(action: togglePlayPause) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
+                    .font(.system(size: 68))
                     .foregroundColor(.white)
             }
             
-            // +10 sn sarma butonu
-            Button(action: { seekRelative(10); resetControlsTimer() }) {
+            // +10 sn Butonu
+            Button(action: {
+                seekRelative(10)
+                resetControlsTimer()
+            }) {
                 Image(systemName: "goforward.10")
-                    .font(.system(size: 32))
+                    .font(.system(size: 34))
                     .foregroundColor(.white)
             }
         }
     }
     
-    private var bottomBar: some View {
+    private var bottomBarView: some View {
         VStack(spacing: 8) {
-            HStack {
+            HStack(spacing: 12) {
                 Text(formatTime(currentTime))
                     .font(.caption)
                     .foregroundColor(.white)
@@ -307,15 +339,15 @@ public struct CustomPlayerView: View {
                     .font(.caption)
                     .foregroundColor(.white)
                 
-                // Sonraki Bölüm Butonu (Varsa)
+                // Varsa Sonraki Bölüm Butonu
                 if hasNextEpisode {
                     Button(action: playNextEpisode) {
                         HStack(spacing: 4) {
                             Text("Sonraki Bölüm")
                                 .font(.caption)
-                                .fontWeight(.semibold)
+                                .fontWeight(.bold)
                             Image(systemName: "forward.end.fill")
-                                .font(.caption)
+                                .font(.caption2)
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
@@ -323,40 +355,32 @@ public struct CustomPlayerView: View {
                         .background(Color.red)
                         .cornerRadius(6)
                     }
-                    .padding(.leading, 8)
                 }
             }
             .padding(.horizontal)
-            .padding(.bottom, 24)
+            .padding(.bottom, 20)
         }
     }
     
-    // MARK: - Oynatıcı Mantığı & HTTP Referer Desteği
+    // MARK: - Oynatıcı Mantığı
     
     private func loadPlayer() {
         player?.pause()
         
         let playUrl: URL
-        // Yerel indirilmiş dosya var mı kontrolü
         if let localPath = currentMedia.localRelativePath, FileManager.default.fileExists(atPath: localPath) {
             playUrl = URL(fileURLWithPath: localPath)
-            let playerItem = AVPlayerItem(url: playUrl)
-            setupPlayerWithItem(playerItem)
+            let item = AVPlayerItem(url: playUrl)
+            setupPlayerWithItem(item)
         } else {
             playUrl = currentMedia.streamUrl
-            
-            // HTTP Header'ları ekleme (Referer & User-Agent)
             var headers: [String: String] = [:]
-            if let ref = currentMedia.httpReferrer, !ref.isEmpty {
-                headers["Referer"] = ref
-            }
-            if let ua = currentMedia.httpUserAgent, !ua.isEmpty {
-                headers["User-Agent"] = ua
-            }
+            if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
+            if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
             
             let asset = AVURLAsset(url: playUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-            let playerItem = AVPlayerItem(asset: asset)
-            setupPlayerWithItem(playerItem)
+            let item = AVPlayerItem(asset: asset)
+            setupPlayerWithItem(item)
         }
     }
     
@@ -364,7 +388,6 @@ public struct CustomPlayerView: View {
         let p = AVPlayer(playerItem: item)
         self.player = p
         
-        // Zaman gözlemcisi
         p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
             if !isDraggingSlider {
                 self.currentTime = time.seconds
@@ -374,7 +397,6 @@ public struct CustomPlayerView: View {
             }
         }
         
-        // Video bittiğinde otomatik sonraki bölüme geç
         NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -401,10 +423,19 @@ public struct CustomPlayerView: View {
         resetControlsTimer()
     }
     
+    private func handleSingleTap() {
+        withAnimation {
+            showControls.toggle()
+        }
+        if showControls {
+            resetControlsTimer()
+        }
+    }
+    
     private func seekRelative(_ seconds: Double) {
-        guard let p = player else { return }
         let target = max(0, min(totalDuration, currentTime + seconds))
         seekTo(seconds: target)
+        resetControlsTimer()
     }
     
     private func seekTo(seconds: Double) {
@@ -416,13 +447,13 @@ public struct CustomPlayerView: View {
     private func start2XSpeed() {
         guard let p = player else { return }
         p.rate = 2.0
-        isFastForwarding = true
+        is2XActive = true
     }
     
     private func stop2XSpeed() {
         guard let p = player else { return }
         p.rate = isPlaying ? 1.0 : 0.0
-        isFastForwarding = false
+        is2XActive = false
     }
     
     private func triggerForwardFeedback() {
@@ -450,33 +481,12 @@ public struct CustomPlayerView: View {
         loadPlayer()
     }
     
-    private func toggleControls() {
-        withAnimation {
-            showControls.toggle()
-        }
-        if showControls {
-            resetControlsTimer()
-        }
-    }
-    
     private func resetControlsTimer() {
         controlsTimer?.invalidate()
-        controlsTimer = Timer.scheduledTimer(withTimeInterval: 3.5, repeats: false) { _ in
+        controlsTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
             withAnimation {
                 showControls = false
             }
-        }
-    }
-    
-    private func setLandscapeOrientation(_ landscape: Bool) {
-        if #available(iOS 16.0, *) {
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-            let orientation: UIInterfaceOrientationMask = landscape ? .landscapeRight : .portrait
-            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation))
-        } else {
-            let orientation = landscape ? UIInterfaceOrientation.landscapeRight.rawValue : UIInterfaceOrientation.portrait.rawValue
-            UIDevice.current.setValue(orientation, forKey: "orientation")
-            UIViewController.attemptRotationToDeviceOrientation()
         }
     }
     

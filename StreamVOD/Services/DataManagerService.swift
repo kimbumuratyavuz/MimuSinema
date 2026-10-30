@@ -5,15 +5,12 @@ import Combine
 public final class DataManagerService: ObservableObject {
     public static let shared = DataManagerService()
     
-    // M3U URL'leri
     public static let movieM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/filmuygulama.m3u")!
     public static let seriesM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/diziuygulama.m3u")!
     
-    // Tüm Ham Veri Havuzu (Arka planda tutulur)
     private var allMoviesPool: [MediaItem] = []
     private var allSeriesPool: [SeriesGroup] = []
     
-    // UI İçin 50'şer Sayfalanmış Veriler (Donmayı önler)
     @Published public var visibleMovies: [MediaItem] = []
     @Published public var visibleSeries: [SeriesGroup] = []
     
@@ -25,9 +22,15 @@ public final class DataManagerService: ObservableObject {
     private var currentMoviePage = 0
     private var currentSeriesPage = 0
     
-    private init() {}
+    private init() {
+        // Disk Cache Yapılandırması (100MB RAM, 300MB Disk)
+        let cache = URLCache(memoryCapacity: 100 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024, diskPath: "mimusinema_cache")
+        URLCache.shared = cache
+        
+        // 1. ANINDA AÇILMA: Yerel önbellekten hemen verileri yükle
+        loadLocalCache()
+    }
     
-    // MARK: - Verileri Yükle
     public func fetchAllData() {
         Task {
             await fetchMovies()
@@ -37,12 +40,15 @@ public final class DataManagerService: ObservableObject {
     
     public func fetchMovies() async {
         guard !isLoadingMovies else { return }
-        isLoadingMovies = true
+        if visibleMovies.isEmpty { isLoadingMovies = true }
         
         do {
-            let (data, _) = try await URLSession.shared.data(from: Self.movieM3UUrl)
+            var request = URLRequest(url: Self.movieM3UUrl)
+            request.cachePolicy = .useProtocolCachePolicy
+            request.timeoutInterval = 15
+            
+            let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
-                // Arka planda parse et
                 let parsed = await Task.detached(priority: .userInitiated) {
                     M3UParserService.shared.parse(m3uContent: content, isSeriesOverride: false)
                 }.value
@@ -51,9 +57,14 @@ public final class DataManagerService: ObservableObject {
                 self.currentMoviePage = 0
                 self.visibleMovies = []
                 self.loadMoreMovies()
+                
+                // Diske kaydet (sonraki açılışta 0 ms için)
+                self.saveMoviesToDisk(items: parsed)
             }
         } catch {
-            self.errorMessage = "Filmler yüklenemedi: \(error.localizedDescription)"
+            if visibleMovies.isEmpty {
+                self.errorMessage = "Filmler yüklenemedi: \(error.localizedDescription)"
+            }
         }
         
         isLoadingMovies = false
@@ -61,12 +72,15 @@ public final class DataManagerService: ObservableObject {
     
     public func fetchSeries() async {
         guard !isLoadingSeries else { return }
-        isLoadingSeries = true
+        if visibleSeries.isEmpty { isLoadingSeries = true }
         
         do {
-            let (data, _) = try await URLSession.shared.data(from: Self.seriesM3UUrl)
+            var request = URLRequest(url: Self.seriesM3UUrl)
+            request.cachePolicy = .useProtocolCachePolicy
+            request.timeoutInterval = 15
+            
+            let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
-                // Arka planda parse et ve dizi adına göre grupla
                 let parsedGroups = await Task.detached(priority: .userInitiated) {
                     let items = M3UParserService.shared.parse(m3uContent: content, isSeriesOverride: true)
                     return M3UParserService.shared.groupSeries(items: items)
@@ -76,15 +90,18 @@ public final class DataManagerService: ObservableObject {
                 self.currentSeriesPage = 0
                 self.visibleSeries = []
                 self.loadMoreSeries()
+                
+                // Diske kaydet
+                self.saveSeriesToDisk(groups: parsedGroups)
             }
         } catch {
-            self.errorMessage = "Diziler yüklenemedi: \(error.localizedDescription)"
+            if visibleSeries.isEmpty {
+                self.errorMessage = "Diziler yüklenemedi: \(error.localizedDescription)"
+            }
         }
         
         isLoadingSeries = false
     }
-    
-    // MARK: - 50'şer 50'şer Sayfalama (Pagination / Lazy Loading)
     
     public func loadMoreMovies() {
         let startIndex = currentMoviePage * pageSize
@@ -114,5 +131,51 @@ public final class DataManagerService: ObservableObject {
     
     public var hasMoreSeries: Bool {
         visibleSeries.count < allSeriesPool.count
+    }
+    
+    // MARK: - Anında Açılış İçin Disk Önbelleği
+    private var moviesCacheFile: URL {
+        let docs = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("cached_movies.json")
+    }
+    
+    private var seriesCacheFile: URL {
+        let docs = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("cached_series.json")
+    }
+    
+    private func saveMoviesToDisk(items: [MediaItem]) {
+        Task.detached(priority: .background) {
+            if let data = try? JSONEncoder().encode(items) {
+                try? data.write(to: self.moviesCacheFile)
+            }
+        }
+    }
+    
+    private func saveSeriesToDisk(groups: [SeriesGroup]) {
+        // SeriesGroup'ların bölümlerini kaydet
+        Task.detached(priority: .background) {
+            let allEps = groups.flatMap { $0.episodes }
+            if let data = try? JSONEncoder().encode(allEps) {
+                try? data.write(to: self.seriesCacheFile)
+            }
+        }
+    }
+    
+    private func loadLocalCache() {
+        if let data = try? Data(contentsOf: moviesCacheFile),
+           let cached = try? JSONDecoder().decode([MediaItem].self, from: data),
+           !cached.isEmpty {
+            self.allMoviesPool = cached
+            self.loadMoreMovies()
+        }
+        
+        if let sData = try? Data(contentsOf: seriesCacheFile),
+           let cachedEps = try? JSONDecoder().decode([MediaItem].self, from: sData),
+           !cachedEps.isEmpty {
+            let grouped = M3UParserService.shared.groupSeries(items: cachedEps)
+            self.allSeriesPool = grouped
+            self.loadMoreSeries()
+        }
     }
 }

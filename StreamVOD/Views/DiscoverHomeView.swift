@@ -5,17 +5,12 @@ public struct DiscoverHomeView: View {
     @ObservedObject private var favoritesService = FavoritesService.shared
     @ObservedObject private var downloadManager = DownloadManagerService.shared
     
-    // Tab yönlendirmesi için Binding
     @Binding public var selectedTab: TabItemType
     
-    // Oynatıcı Durumları
     @State private var playingMovie: MediaItem? = nil
     @State private var selectedSeries: SeriesGroup? = nil
-    
-    // Hero Slider Otomatik Kaydırma Durumu
     @State private var currentHeroIndex: Int = 0
     
-    // Hero Slider İçin Öne Çıkanlar (İlk 5 film ve ilk 3 diziden derlenir)
     private var heroItems: [MediaItem] {
         var items: [MediaItem] = []
         if !dataManager.visibleMovies.isEmpty {
@@ -32,15 +27,12 @@ public struct DiscoverHomeView: View {
     public var body: some View {
         NavigationView {
             ZStack {
-                // Netflix Koyu Arka Planı
                 Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
                 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 24) {
-                        // 1. HEADER: NETFLIX LOGO & ARAMA
                         netflixHeaderView
                         
-                        // 2. HERO CAROUSEL: KAYAN ÖNE ÇIKAN FİLM & DİZİLER
                         if !heroItems.isEmpty {
                             heroCarouselSection
                         } else if dataManager.isLoadingMovies {
@@ -49,7 +41,7 @@ public struct DiscoverHomeView: View {
                                 .frame(height: 320)
                         }
                         
-                        // 3. ÖNERİLEN FİLMLER BÖLÜMÜ (TAMAMINI GÖR BUTONLU)
+                        // Önerilen Filmler
                         VStack(spacing: 12) {
                             sectionHeader(
                                 title: "Önerilen Filmler",
@@ -76,7 +68,7 @@ public struct DiscoverHomeView: View {
                             }
                         }
                         
-                        // 4. ÖNERİLEN DİZİLER BÖLÜMÜ (TAMAMINI GÖR BUTONLU)
+                        // Trend Diziler
                         VStack(spacing: 12) {
                             sectionHeader(
                                 title: "Trend Diziler",
@@ -93,24 +85,16 @@ public struct DiscoverHomeView: View {
                                         }) {
                                             VStack(alignment: .leading, spacing: 6) {
                                                 ZStack(alignment: .bottomTrailing) {
-                                                    if let logo = group.logoUrl, let url = URL(string: logo) {
-                                                        AsyncImage(url: url) { phase in
-                                                            if let img = phase.image {
-                                                                img.resizable().aspectRatio(contentMode: .fill)
-                                                            } else {
-                                                                Rectangle().fill(Color.gray.opacity(0.3))
-                                                            }
-                                                        }
-                                                        .frame(width: 135, height: 180)
-                                                        .cornerRadius(8)
-                                                        .clipped()
-                                                    } else {
+                                                    CachedAsyncImage(urlString: group.logoUrl) { img in
+                                                        img.resizable().aspectRatio(contentMode: .fill)
+                                                    } placeholder: {
                                                         Rectangle()
-                                                            .fill(Color.gray.opacity(0.2))
-                                                            .frame(width: 135, height: 180)
-                                                            .overlay(Image(systemName: "tv").foregroundColor(.gray))
-                                                            .cornerRadius(8)
+                                                            .fill(Color.gray.opacity(0.18))
+                                                            .overlay(Image(systemName: "tv").foregroundColor(.gray.opacity(0.5)))
                                                     }
+                                                    .frame(width: 135, height: 180)
+                                                    .cornerRadius(8)
+                                                    .clipped()
                                                     
                                                     Text("\(group.episodes.count) Bölüm")
                                                         .font(.system(size: 9, weight: .bold))
@@ -149,8 +133,7 @@ public struct DiscoverHomeView: View {
                             }
                         }
                         
-                        // Alt tab bar için boşluk
-                        Spacer().frame(height: 80)
+                        Spacer().frame(height: 85)
                     }
                 }
             }
@@ -174,10 +157,8 @@ public struct DiscoverHomeView: View {
         }
     }
     
-    // MARK: - Netflix Üst Logo Barı
     private var netflixHeaderView: some View {
         HStack {
-            // MimuSinema Markası
             HStack(spacing: 6) {
                 Text("M")
                     .font(.system(size: 32, weight: .black, design: .rounded))
@@ -191,7 +172,6 @@ public struct DiscoverHomeView: View {
             
             Spacer()
             
-            // Hızlı Arama Butonu
             Button(action: {
                 selectedTab = .movies
             }) {
@@ -206,26 +186,18 @@ public struct DiscoverHomeView: View {
         .padding(.top, 10)
     }
     
-    // MARK: - Netflix Tarzı Kayan Hero Carousel
     private var heroCarouselSection: some View {
         TabView(selection: $currentHeroIndex) {
             ForEach(Array(heroItems.enumerated()), id: \.element.id) { index, item in
                 ZStack(alignment: .bottom) {
-                    // Arka Plan Afiş Resmi
-                    if let logo = item.logoUrl, let url = URL(string: logo) {
-                        AsyncImage(url: url) { phase in
-                            if let img = phase.image {
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else {
-                                Rectangle().fill(Color.gray.opacity(0.2))
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: 380)
-                        .clipped()
+                    CachedAsyncImage(urlString: item.logoUrl) { img in
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Rectangle().fill(Color.gray.opacity(0.2))
                     }
+                    .frame(maxWidth: .infinity, maxHeight: 380)
+                    .clipped()
                     
-                    // Netflix Stili Gradyan Karartma
                     LinearGradient(
                         colors: [
                             Color.clear,
@@ -237,9 +209,7 @@ public struct DiscoverHomeView: View {
                         endPoint: .bottom
                     )
                     
-                    // İçerik Başlığı ve Eylem Butonları
                     VStack(spacing: 10) {
-                        // Kategori & Dil Rozeti
                         HStack(spacing: 8) {
                             Text(item.groupTitle)
                                 .font(.caption2)
@@ -257,7 +227,6 @@ public struct DiscoverHomeView: View {
                             }
                         }
                         
-                        // Başlık
                         Text(item.cleanTitle)
                             .font(.title2)
                             .fontWeight(.black)
@@ -266,9 +235,7 @@ public struct DiscoverHomeView: View {
                             .lineLimit(2)
                             .padding(.horizontal, 24)
                         
-                        // Netflix Butonları: "İzle" & "Favorilerim"
                         HStack(spacing: 16) {
-                            // Favori Butonu
                             Button(action: {
                                 favoritesService.toggleFavorite(media: item)
                             }) {
@@ -282,7 +249,6 @@ public struct DiscoverHomeView: View {
                                 .frame(width: 70)
                             }
                             
-                            // Büyük Şimdi Oynat Butonu
                             Button(action: {
                                 playingMovie = item
                             }) {
@@ -300,7 +266,6 @@ public struct DiscoverHomeView: View {
                                 .cornerRadius(6)
                             }
                             
-                            // İndir Butonu
                             Button(action: {
                                 downloadManager.addToQueue(media: item)
                             }) {
@@ -325,7 +290,6 @@ public struct DiscoverHomeView: View {
         .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
     }
     
-    // MARK: - Bölüm Başlığı & "Tamamını Gör" Butonu
     private func sectionHeader(title: String, seeAllAction: @escaping () -> Void) -> some View {
         HStack {
             Text(title)

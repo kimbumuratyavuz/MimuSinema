@@ -8,10 +8,9 @@ public struct MainTabView: View {
     
     public var body: some View {
         ZStack(alignment: .bottom) {
-            // Arka Plan Karartması
-            Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
+            Color(red: 0.05, green: 0.05, blue: 0.07)
+                .ignoresSafeArea()
             
-            // SEKMELERİN İÇERİĞİ
             Group {
                 switch selectedTab {
                 case .home:
@@ -27,8 +26,8 @@ public struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .top)
             
-            // GLASSMORPHISM ŞEFFAF VE KAVİSLİ TAB MENÜ
             GlassmorphicTabBar(selectedTab: $selectedTab)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)

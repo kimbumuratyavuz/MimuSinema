@@ -16,32 +16,23 @@ public struct MediaCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             // Poster Alanı
             ZStack(alignment: .topTrailing) {
-                // Afiş Görseli
-                if let logoStr = item.logoUrl, let url = URL(string: logoStr) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(ProgressView().tint(.white))
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure:
-                            defaultPoster
-                        @unknown default:
-                            defaultPoster
-                        }
-                    }
-                    .frame(height: 180)
-                    .clipped()
-                    .cornerRadius(10)
-                } else {
-                    defaultPoster
-                        .frame(height: 180)
-                        .cornerRadius(10)
+                // Hızlı Disk Cache Destekli Afiş
+                CachedAsyncImage(urlString: item.logoUrl) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.18))
+                        .overlay(
+                            Image(systemName: "film")
+                                .font(.title3)
+                                .foregroundColor(.gray.opacity(0.5))
+                        )
                 }
+                .frame(height: 180)
+                .clipped()
+                .cornerRadius(10)
                 
                 // Sol Üst: Favori Kalp Butonu
                 VStack {
@@ -50,10 +41,10 @@ public struct MediaCardView: View {
                             favoritesService.toggleFavorite(media: item)
                         }) {
                             Image(systemName: isFav ? "heart.fill" : "heart")
-                                .font(.system(size: 16))
+                                .font(.system(size: 15))
                                 .foregroundColor(isFav ? .red : .white)
                                 .padding(6)
-                                .background(Circle().fill(Color.black.opacity(0.6)))
+                                .background(Circle().fill(Color.black.opacity(0.65)))
                         }
                         .padding(6)
                         
@@ -91,13 +82,13 @@ public struct MediaCardView: View {
             }
             .frame(height: 32, alignment: .topLeading)
             
-            // Kartın Altındaki "İzle" ve "İndir" Butonları (Yan Yana)
+            // Kartın Altındaki "İzle" ve "İndir" Butonları
             HStack(spacing: 6) {
                 // İZLE BUTONU
                 Button(action: onPlay) {
                     HStack(spacing: 3) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                         Text("İzle")
                             .font(.caption2)
                             .fontWeight(.bold)
@@ -119,7 +110,7 @@ public struct MediaCardView: View {
                 }) {
                     HStack(spacing: 3) {
                         Image(systemName: isAddedToQueue ? "checkmark" : "arrow.down")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                         Text(isAddedToQueue ? "Eklendi" : "İndir")
                             .font(.caption2)
                             .fontWeight(.semibold)
@@ -133,15 +124,5 @@ public struct MediaCardView: View {
             }
         }
         .frame(width: 135)
-    }
-    
-    private var defaultPoster: some View {
-        Rectangle()
-            .fill(Color.gray.opacity(0.2))
-            .overlay(
-                Image(systemName: "film")
-                    .font(.title)
-                    .foregroundColor(.gray)
-            )
     }
 }
