@@ -15,14 +15,17 @@ public struct FavoritesView: View {
         }
     }
     
-    private let columns = [
-        GridItem(.adaptive(minimum: 125, maximum: 145), spacing: 14)
+    // Sağ ve sol boşlukları sıfırlayan 3 sütunlu esnek ızgara
+    private let gridColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
     ]
     
     public var body: some View {
         NavigationView {
             ZStack {
-                Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea()
+                Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea()
                 
                 VStack(spacing: 0) {
                     // Filtreleme Segmenti
@@ -32,13 +35,14 @@ public struct FavoritesView: View {
                         Text("Diziler").tag(2)
                     }
                     .pickerStyle(.segmented)
-                    .padding()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     
                     if filteredItems.isEmpty {
                         emptyFavoritesView
                     } else {
                         ScrollView {
-                            LazyVGrid(columns: columns, spacing: 16) {
+                            LazyVGrid(columns: gridColumns, spacing: 14) {
                                 ForEach(filteredItems) { item in
                                     MediaCardView(
                                         item: item,
@@ -51,7 +55,10 @@ public struct FavoritesView: View {
                                     )
                                 }
                             }
-                            .padding()
+                            .padding(.horizontal, 10)
+                            .padding(.top, 6)
+                            
+                            Spacer().frame(height: 85)
                         }
                     }
                 }
@@ -68,12 +75,12 @@ public struct FavoritesView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "heart.slash")
-                .font(.system(size: 50))
+                .font(.system(size: 48))
                 .foregroundColor(.gray)
             Text("Henüz favori eklemediniz")
                 .font(.headline)
                 .foregroundColor(.white)
-            Text("Beğendiğiniz film ve dizileri afişlerindeki kalp ikonuna dokunarak buraya ekleyebilirsiniz.")
+            Text("Beğendiğiniz film ve dizileri afişlerindeki kalp butonuna basarak buraya ekleyebilirsiniz.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
