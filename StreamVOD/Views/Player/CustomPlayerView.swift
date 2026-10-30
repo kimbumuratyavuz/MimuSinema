@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import AVFoundation
 
 // MARK: - Global Orientation Manager
 public final class OrientationManager {
@@ -231,6 +232,7 @@ public struct CustomPlayerView: View {
         }
         .statusBarHidden(true)
         .onAppear {
+            configureAudioSession()
             loadPlayer()
             resetControlsTimer()
         }
@@ -241,6 +243,16 @@ public struct CustomPlayerView: View {
             player?.pause()
             player = nil
             controlsTimer?.invalidate()
+        }
+    }
+    
+    // MARK: - Ses Sistemi Yapılandırması (Sessiz Modda Bile Ses Çıkmasını Sağlar)
+    private func configureAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Audio session configuration error: \(error)")
         }
     }
     
@@ -396,7 +408,7 @@ public struct CustomPlayerView: View {
         resetControlsTimer()
     }
     
-    // MARK: - Oynatıcı Yükleme & Tamponlama Optimizasyonu
+    // MARK: - Oynatıcı Yükleme & Ses Optimizasyonu
     private func loadPlayer() {
         player?.pause()
         playbackErrorMessage = nil
@@ -414,7 +426,6 @@ public struct CustomPlayerView: View {
             let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
             item = AVPlayerItem(asset: asset)
             
-            // DONMAYI ÖNLEME: İleriye dönük 15 saniyelik tampon belleği garantiye al
             item.preferredForwardBufferDuration = 15.0
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         }
@@ -424,9 +435,22 @@ public struct CustomPlayerView: View {
     
     private func setupPlayerWithItem(_ item: AVPlayerItem) {
         let p = AVPlayer(playerItem: item)
-        // Donmaları önlemek için akıcı oynatma tamponunu aç
         p.automaticallyWaitsToMinimizeStalling = true
+        
+        // SESİN KESİNLİKLE AÇIK OLMASINI GARANTİLE
+        p.volume = 1.0
+        p.isMuted = false
+        
         self.player = p
+        
+        // Varsa Ses Grubundaki İlk Aktif Ses Kanalını Seç
+        Task {
+            if let group = try? await item.asset.loadMediaSelectionGroup(for: .audible) {
+                if let defaultOption = group.defaultOption ?? group.options.first {
+                    item.select(defaultOption, in: group)
+                }
+            }
+        }
         
         p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
             if !isDraggingSlider && !isSeeking {
@@ -482,7 +506,6 @@ public struct CustomPlayerView: View {
         }
     }
     
-    // MARK: - DONMAYAN AKICI İLERİ/GERİ SARMA (Smooth Fast Keyframe Seeking)
     private func seekRelative(_ seconds: Double) {
         let target = max(0, min(totalDuration, currentTime + seconds))
         currentTime = target
@@ -493,7 +516,6 @@ public struct CustomPlayerView: View {
     private func performSmoothSeek(to seconds: Double) {
         guard let p = player else { return }
         
-        // Eğer zaten arama yapılıyorsa en son hedefi kaydet ve bekle (debouncing)
         if isSeeking {
             pendingSeekTarget = seconds
             return
@@ -501,15 +523,11 @@ public struct CustomPlayerView: View {
         
         isSeeking = true
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
-        
-        // DONMAYI ÖNLEYEN KRİTİK NOKTA:
-        // tolerance: .zero yerine en yakın I-Frame'e (Keyframe) hızlı atlama yapıyoruz.
-        // Bu sayede video asla donmaz, tamponu boşaltmaz ve anında o saniyeden oynamaya başlar!
         let tolerance = CMTime(seconds: 2.0, preferredTimescale: 600)
+        
         p.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
             self.isSeeking = false
             
-            // Peş peşe dokunulduysa son sıçramayı uygula
             if let nextTarget = self.pendingSeekTarget {
                 self.pendingSeekTarget = nil
                 self.performSmoothSeek(to: nextTarget)
