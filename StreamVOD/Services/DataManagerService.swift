@@ -23,11 +23,9 @@ public final class DataManagerService: ObservableObject {
     private var currentSeriesPage = 0
     
     private init() {
-        // Disk Cache Yapılandırması (100MB RAM, 300MB Disk)
         let cache = URLCache(memoryCapacity: 100 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024, diskPath: "mimusinema_cache")
         URLCache.shared = cache
         
-        // 1. ANINDA AÇILMA: Yerel önbellekten hemen verileri yükle
         loadLocalCache()
     }
     
@@ -58,7 +56,6 @@ public final class DataManagerService: ObservableObject {
                 self.visibleMovies = []
                 self.loadMoreMovies()
                 
-                // Diske kaydet (sonraki açılışta 0 ms için)
                 self.saveMoviesToDisk(items: parsed)
             }
         } catch {
@@ -91,7 +88,6 @@ public final class DataManagerService: ObservableObject {
                 self.visibleSeries = []
                 self.loadMoreSeries()
                 
-                // Diske kaydet
                 self.saveSeriesToDisk(groups: parsedGroups)
             }
         } catch {
@@ -133,44 +129,48 @@ public final class DataManagerService: ObservableObject {
         visibleSeries.count < allSeriesPool.count
     }
     
-    // MARK: - Anında Açılış İçin Disk Önbelleği
-    private var moviesCacheFile: URL {
+    // MARK: - Anında Açılış İçin Disk Önbelleği (nonisolated static)
+    private static var moviesCacheFile: URL {
         let docs = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("cached_movies.json")
     }
     
-    private var seriesCacheFile: URL {
+    private static var seriesCacheFile: URL {
         let docs = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("cached_series.json")
     }
     
     private func saveMoviesToDisk(items: [MediaItem]) {
+        let targetUrl = Self.moviesCacheFile
         Task.detached(priority: .background) {
             if let data = try? JSONEncoder().encode(items) {
-                try? data.write(to: self.moviesCacheFile)
+                try? data.write(to: targetUrl)
             }
         }
     }
     
     private func saveSeriesToDisk(groups: [SeriesGroup]) {
-        // SeriesGroup'ların bölümlerini kaydet
+        let targetUrl = Self.seriesCacheFile
         Task.detached(priority: .background) {
             let allEps = groups.flatMap { $0.episodes }
             if let data = try? JSONEncoder().encode(allEps) {
-                try? data.write(to: self.seriesCacheFile)
+                try? data.write(to: targetUrl)
             }
         }
     }
     
     private func loadLocalCache() {
-        if let data = try? Data(contentsOf: moviesCacheFile),
+        let mFile = Self.moviesCacheFile
+        let sFile = Self.seriesCacheFile
+        
+        if let data = try? Data(contentsOf: mFile),
            let cached = try? JSONDecoder().decode([MediaItem].self, from: data),
            !cached.isEmpty {
             self.allMoviesPool = cached
             self.loadMoreMovies()
         }
         
-        if let sData = try? Data(contentsOf: seriesCacheFile),
+        if let sData = try? Data(contentsOf: sFile),
            let cachedEps = try? JSONDecoder().decode([MediaItem].self, from: sData),
            !cachedEps.isEmpty {
             let grouped = M3UParserService.shared.groupSeries(items: cachedEps)
