@@ -52,7 +52,6 @@ public struct SeriesDetailView: View {
                                 .foregroundColor(.gray)
                             
                             HStack(spacing: 8) {
-                                // FAVORİ EKLE BUTONU
                                 Button(action: {
                                     favoritesService.toggleSeriesFavorite(series: series)
                                 }) {
@@ -70,7 +69,6 @@ public struct SeriesDetailView: View {
                                     .cornerRadius(6)
                                 }
                                 
-                                // BU SEZONU İNDİR BUTONU
                                 Button(action: addSeasonToQueue) {
                                     HStack(spacing: 4) {
                                         Image(systemName: "arrow.down.to.line.circle")
@@ -143,6 +141,8 @@ public struct SeriesDetailView: View {
                     // BÖLÜMLER LİSTESİ
                     LazyVStack(spacing: 8) {
                         ForEach(Array(currentSeasonEpisodes.enumerated()), id: \.element.id) { index, ep in
+                            let isEpQueued = downloadManager.isItemQueued(media: ep)
+                            
                             HStack(spacing: 12) {
                                 Button(action: {
                                     if let originalIndex = series.episodes.firstIndex(where: { $0.id == ep.id }) {
@@ -183,15 +183,27 @@ public struct SeriesDetailView: View {
                                 
                                 Spacer()
                                 
+                                // BÖLÜM İNDİRME BUTONU (KUYRUKTAYSA PASİF)
                                 Button(action: {
-                                    downloadManager.addToQueue(media: ep)
+                                    if !isEpQueued {
+                                        downloadManager.addToQueue(media: ep)
+                                    }
                                 }) {
-                                    Image(systemName: "arrow.down.circle")
-                                        .font(.title3)
-                                        .foregroundColor(.white.opacity(0.85))
-                                        .padding(6)
-                                        .background(Circle().fill(Color.white.opacity(0.12)))
+                                    HStack(spacing: 4) {
+                                        Image(systemName: isEpQueued ? "checkmark.circle.fill" : "arrow.down.circle")
+                                            .font(.title3)
+                                        if isEpQueued {
+                                            Text("Kuyrukta")
+                                                .font(.caption2)
+                                                .fontWeight(.bold)
+                                        }
+                                    }
+                                    .foregroundColor(isEpQueued ? .green : .white.opacity(0.85))
+                                    .padding(6)
+                                    .background(isEpQueued ? Color.green.opacity(0.2) : Color.white.opacity(0.12))
+                                    .cornerRadius(6)
                                 }
+                                .disabled(isEpQueued) // KUYRUKTAYSA PASİFLEŞİR
                             }
                             .padding(.horizontal)
                             .padding(.vertical, 8)
@@ -273,7 +285,6 @@ public struct SeriesView: View {
                                 NavigationLink(destination: SeriesDetailView(series: group)) {
                                     VStack(alignment: .leading, spacing: 5) {
                                         ZStack(alignment: .topLeading) {
-                                            // Dizi Afişi
                                             CachedAsyncImage(urlString: group.logoUrl) { img in
                                                 img.resizable().aspectRatio(contentMode: .fill)
                                             } placeholder: {
@@ -286,7 +297,6 @@ public struct SeriesView: View {
                                             .cornerRadius(8)
                                             .clipped()
                                             
-                                            // SOL ÜST: DİZİ FAVORİ (KALP) BUTONU
                                             Button(action: {
                                                 favoritesService.toggleSeriesFavorite(series: group)
                                             }) {
@@ -299,7 +309,6 @@ public struct SeriesView: View {
                                             .padding(5)
                                             .buttonStyle(.plain)
                                             
-                                            // SAĞ ALT: BÖLÜM SAYISI ROZETİ
                                             VStack {
                                                 Spacer()
                                                 HStack {

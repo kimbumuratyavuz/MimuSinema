@@ -5,6 +5,7 @@ import Combine
 public final class DataManagerService: ObservableObject {
     public static let shared = DataManagerService()
     
+    // YALNIZCA KULLANICININ VERDİĞİ ORİJİNAL ADRESLER
     public static let movieM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/filmuygulama.m3u")!
     public static let seriesM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/diziuygulama.m3u")!
     
@@ -42,21 +43,36 @@ public final class DataManagerService: ObservableObject {
         
         do {
             var request = URLRequest(url: Self.movieM3UUrl)
-            request.cachePolicy = .useProtocolCachePolicy
-            request.timeoutInterval = 15
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 60
             
-            let (data, _) = try await URLSession.shared.data(for: request)
-            if let content = String(data: data, encoding: .utf8) {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            // Eğer HTTP 200 geldiyse parse et
+            if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200,
+               let content = String(data: data, encoding: .utf8), content.contains("#EXT") {
                 let parsed = await Task.detached(priority: .userInitiated) {
                     M3UParserService.shared.parse(m3uContent: content, isSeriesOverride: false)
                 }.value
                 
-                self.allMoviesPool = parsed
-                self.currentMoviePage = 0
-                self.visibleMovies = []
-                self.loadMoreMovies()
-                
-                self.saveMoviesToDisk(items: parsed)
+                if !parsed.isEmpty {
+                    self.allMoviesPool = parsed
+                    self.currentMoviePage = 0
+                    self.visibleMovies = []
+                    self.loadMoreMovies()
+                    self.saveMoviesToDisk(items: parsed)
+                }
+            } else if let content = String(data: data, encoding: .utf8), content.contains("#EXT") {
+                let parsed = await Task.detached(priority: .userInitiated) {
+                    M3UParserService.shared.parse(m3uContent: content, isSeriesOverride: false)
+                }.value
+                if !parsed.isEmpty {
+                    self.allMoviesPool = parsed
+                    self.currentMoviePage = 0
+                    self.visibleMovies = []
+                    self.loadMoreMovies()
+                    self.saveMoviesToDisk(items: parsed)
+                }
             }
         } catch {
             if visibleMovies.isEmpty {
@@ -73,22 +89,23 @@ public final class DataManagerService: ObservableObject {
         
         do {
             var request = URLRequest(url: Self.seriesM3UUrl)
-            request.cachePolicy = .useProtocolCachePolicy
-            request.timeoutInterval = 15
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 60
             
             let (data, _) = try await URLSession.shared.data(for: request)
-            if let content = String(data: data, encoding: .utf8) {
+            if let content = String(data: data, encoding: .utf8), content.contains("#EXT") {
                 let parsedGroups = await Task.detached(priority: .userInitiated) {
                     let items = M3UParserService.shared.parse(m3uContent: content, isSeriesOverride: true)
                     return M3UParserService.shared.groupSeries(items: items)
                 }.value
                 
-                self.allSeriesPool = parsedGroups
-                self.currentSeriesPage = 0
-                self.visibleSeries = []
-                self.loadMoreSeries()
-                
-                self.saveSeriesToDisk(groups: parsedGroups)
+                if !parsedGroups.isEmpty {
+                    self.allSeriesPool = parsedGroups
+                    self.currentSeriesPage = 0
+                    self.visibleSeries = []
+                    self.loadMoreSeries()
+                    self.saveSeriesToDisk(groups: parsedGroups)
+                }
             }
         } catch {
             if visibleSeries.isEmpty {
@@ -129,7 +146,6 @@ public final class DataManagerService: ObservableObject {
         visibleSeries.count < allSeriesPool.count
     }
     
-    // MARK: - Anında Açılış İçin Disk Önbelleği (nonisolated static)
     private static var moviesCacheFile: URL {
         let docs = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("cached_movies.json")

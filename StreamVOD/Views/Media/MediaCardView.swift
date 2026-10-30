@@ -6,10 +6,14 @@ public struct MediaCardView: View {
     public var onDownload: () -> Void
     
     @ObservedObject private var favoritesService = FavoritesService.shared
-    @State private var isAddedToQueue = false
+    @ObservedObject private var downloadManager = DownloadManagerService.shared
     
     private var isFav: Bool {
         favoritesService.isFavorite(media: item)
+    }
+    
+    private var isAlreadyQueuedOrDownloaded: Bool {
+        downloadManager.isItemQueued(media: item)
     }
     
     public var body: some View {
@@ -98,25 +102,25 @@ public struct MediaCardView: View {
                     .cornerRadius(5)
                 }
                 
+                // İNDİR BUTONU (KUYRUKTAYSA PASİF VE ONAYLI)
                 Button(action: {
-                    onDownload()
-                    withAnimation { isAddedToQueue = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        withAnimation { isAddedToQueue = false }
+                    if !isAlreadyQueuedOrDownloaded {
+                        onDownload()
                     }
                 }) {
                     HStack(spacing: 2) {
-                        Image(systemName: isAddedToQueue ? "checkmark" : "arrow.down")
+                        Image(systemName: isAlreadyQueuedOrDownloaded ? "checkmark.circle.fill" : "arrow.down")
                             .font(.system(size: 8))
-                        Text(isAddedToQueue ? "Eklendi" : "İndir")
+                        Text(isAlreadyQueuedOrDownloaded ? "Kuyrukta" : "İndir")
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 5)
-                    .background(isAddedToQueue ? Color.green.opacity(0.8) : Color.white.opacity(0.15))
-                    .foregroundColor(.white)
+                    .background(isAlreadyQueuedOrDownloaded ? Color.green.opacity(0.35) : Color.white.opacity(0.15))
+                    .foregroundColor(isAlreadyQueuedOrDownloaded ? Color.green : Color.white)
                     .cornerRadius(5)
                 }
+                .disabled(isAlreadyQueuedOrDownloaded) // KUYRUKTAYSA PASİF
             }
         }
         .frame(maxWidth: .infinity)

@@ -13,7 +13,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     private var isCancelled: Bool = false
     private var urlSession: URLSession!
     
-    // Paralel İndirme Kanal Sayısı (6 Eşzamanlı Kanal)
     private let concurrentWorkers = 6
     
     private override init() {
@@ -24,6 +23,15 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         config.httpMaximumConnectionsPerHost = 12
         self.urlSession = URLSession(configuration: config, delegate: nil, delegateQueue: .main)
         loadSavedState()
+    }
+    
+    // MARK: - Kuyruk ve İndirme Durumu Kontrolleri
+    public func isItemQueued(media: MediaItem) -> Bool {
+        queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl })
+    }
+    
+    public func isItemCompleted(media: MediaItem) -> Bool {
+        queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl && $0.status == .completed })
     }
     
     // MARK: - Klasör Yolları
@@ -155,8 +163,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Yüksek Hızlı İndirme İşlemleri
-    
+    // MARK: - İndirme Başlatma
     public func downloadSingle(id: UUID) {
         guard let idx = queue.firstIndex(where: { $0.id == id }) else { return }
         queue[idx].isSelected = true
@@ -197,10 +204,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
         
         if media.streamUrl.pathExtension.lowercased().contains("m3u8") {
-            // ÇOK KANALLI PARALEL HLS İNDİRME
             downloadM3U8Parallel(media: media, destination: destination, taskIndex: nextTaskIndex)
         } else {
-            // STANDART MP4 İNDİRME
             downloadDirectFile(request: request, destination: destination, taskIndex: nextTaskIndex)
         }
     }
@@ -236,7 +241,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         task.resume()
     }
     
-    // MARK: - ÇOK KANALLI (PARALEL) HLS İNDİRİCİ (6x - 10x Daha Hızlı)
     private func downloadM3U8Parallel(media: MediaItem, destination: URL, taskIndex: Int) {
         Task {
             do {
@@ -269,7 +273,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     }
                 }
                 
-                // Master playlist ise alt playlisti çek
                 if let master = masterPlaylistUrl {
                     var subReq = URLRequest(url: master)
                     if let ref = media.httpReferrer { subReq.setValue(ref, forHTTPHeaderField: "Referer") }
@@ -293,7 +296,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     throw NSError(domain: "MimuSinema", code: -2, userInfo: [NSLocalizedDescriptionKey: "Video parçaları bulunamadı."])
                 }
                 
-                // Hedef dosyayı sıfırla
                 if FileManager.default.fileExists(atPath: destination.path) {
                     try? FileManager.default.removeItem(at: destination)
                 }
@@ -302,16 +304,14 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 
                 let totalSegments = segmentUrls.count
                 var completedSegments = 0
-                let chunkSize = self.concurrentWorkers // Her seferinde paralel indirilecek parça sayısı
+                let chunkSize = self.concurrentWorkers
                 
-                // Segmentleri chunkSize (6'şarlı) gruplar halinde paralel indirip sırasıyla dosyaya yaz
                 for chunkStart in stride(from: 0, to: totalSegments, by: chunkSize) {
                     if self.isCancelled { break }
                     
                     let chunkEnd = min(chunkStart + chunkSize, totalSegments)
                     let currentBatch = Array(segmentUrls[chunkStart..<chunkEnd])
                     
-                    // 6 Kanallı Eşzamanlı İndirme Bloğu
                     let downloadedBatch = try await withThrowingTaskGroup(of: (Int, Data).self) { group in
                         for (localIdx, segUrl) in currentBatch.enumerated() {
                             let globalIdx = chunkStart + localIdx
@@ -332,7 +332,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                         return batchResults.sorted(by: { $0.0 < $1.0 })
                     }
                     
-                    // Sırayla dosyaya stream et
                     for (_, segData) in downloadedBatch {
                         fileHandle.write(segData)
                     }
