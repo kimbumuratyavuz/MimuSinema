@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AVFoundation
 
 @MainActor
 public final class DownloadManagerService: NSObject, ObservableObject {
@@ -25,26 +26,19 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         loadSavedState()
     }
     
-    // MARK: - Kuyruk ve İndirme Durumu Kontrolleri
-    public func isItemQueued(media: MediaItem) -> Bool {
-        queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl })
-    }
-    
-    public func isItemCompleted(media: MediaItem) -> Bool {
-        queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl && $0.status == .completed })
-    }
-    
     // MARK: - Klasör Yolları
+    public var documentsDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
     public var moviesDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("Movies", isDirectory: true)
+        let dir = documentsDirectory.appendingPathComponent("Movies", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
     
     public var seriesDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("Series", isDirectory: true)
+        let dir = documentsDirectory.appendingPathComponent("Series", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -56,15 +50,39 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return dir
     }
     
+    // HLS için MPEG-TS (.ts), MP4 için (.mp4)
     public func destinationUrl(for media: MediaItem) -> URL {
         let sanitizedTitle = sanitizeFileName(media.cleanTitle.isEmpty ? media.title : media.cleanTitle)
+        let isHls = media.streamUrl.absoluteString.lowercased().contains("m3u8")
+        let ext = isHls ? "ts" : "mp4"
         
         if media.isSeries {
             let sFolder = seriesFolderUrl(for: media.seriesName ?? "Diziler")
-            return sFolder.appendingPathComponent("\(sanitizedTitle).mp4")
+            return sFolder.appendingPathComponent("\(sanitizedTitle).\(ext)")
         } else {
-            return moviesDirectory.appendingPathComponent("\(sanitizedTitle).mp4")
+            return moviesDirectory.appendingPathComponent("\(sanitizedTitle).\(ext)")
         }
+    }
+    
+    /// Dinamik ve Sandbox değişimine dayanıklı yerel dosya çözücü
+    public func resolvedLocalUrl(for media: MediaItem) -> URL? {
+        let target = destinationUrl(for: media)
+        if FileManager.default.fileExists(atPath: target.path) {
+            return target
+        }
+        
+        // Göreceli yol kontrolü
+        if let rel = media.localRelativePath {
+            let direct = URL(fileURLWithPath: rel)
+            if FileManager.default.fileExists(atPath: direct.path) {
+                return direct
+            }
+            let docAppended = documentsDirectory.appendingPathComponent(rel)
+            if FileManager.default.fileExists(atPath: docAppended.path) {
+                return docAppended
+            }
+        }
+        return nil
     }
     
     private func sanitizeFileName(_ name: String) -> String {
@@ -72,11 +90,21 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return name.components(separatedBy: invalidChars).joined(separator: "_")
     }
     
+    // MARK: - Kuyruk ve İndirme Durumu Kontrolleri
+    public func isItemQueued(media: MediaItem) -> Bool {
+        queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl })
+    }
+    
+    public func isItemCompleted(media: MediaItem) -> Bool {
+        if let resolved = resolvedLocalUrl(for: media), FileManager.default.fileExists(atPath: resolved.path) {
+            return true
+        }
+        return queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl && $0.status == .completed })
+    }
+    
     // MARK: - Kuyruk Yönetimi
     public func addToQueue(media: MediaItem) {
-        if queue.contains(where: { $0.mediaItem.streamUrl == media.streamUrl }) {
-            return
-        }
+        if isItemQueued(media: media) { return }
         let task = DownloadTaskItem(mediaItem: media)
         queue.append(task)
         saveState()
@@ -106,15 +134,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
             currentProcessingId = nil
         }
         
-        if let filePath = task.localFilePath {
-            if FileManager.default.fileExists(atPath: filePath) {
-                try? FileManager.default.removeItem(atPath: filePath)
-            }
-        } else {
-            let dest = destinationUrl(for: task.mediaItem)
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try? FileManager.default.removeItem(at: dest)
-            }
+        if let localUrl = resolvedLocalUrl(for: task.mediaItem) {
+            try? FileManager.default.removeItem(at: localUrl)
         }
         
         let isSeries = task.mediaItem.isSeries
@@ -132,8 +153,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         let tasksToDelete = queue.filter { $0.mediaItem.isSeries && ($0.mediaItem.seriesName == seriesName) }
         
         for task in tasksToDelete {
-            if let filePath = task.localFilePath, FileManager.default.fileExists(atPath: filePath) {
-                try? FileManager.default.removeItem(atPath: filePath)
+            if let localUrl = resolvedLocalUrl(for: task.mediaItem) {
+                try? FileManager.default.removeItem(at: localUrl)
             }
             if let idx = queue.firstIndex(where: { $0.id == task.id }) {
                 queue.remove(at: idx)
@@ -203,7 +224,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
             request.setValue(ua, forHTTPHeaderField: "User-Agent")
         }
         
-        if media.streamUrl.pathExtension.lowercased().contains("m3u8") {
+        if media.streamUrl.absoluteString.lowercased().contains("m3u8") {
             downloadM3U8Parallel(media: media, destination: destination, taskIndex: nextTaskIndex)
         } else {
             downloadDirectFile(request: request, destination: destination, taskIndex: nextTaskIndex)
@@ -241,6 +262,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         task.resume()
     }
     
+    // MARK: - 6 Kanallı Paralel HLS İndirici
     private func downloadM3U8Parallel(media: MediaItem, destination: URL, taskIndex: Int) {
         Task {
             do {
@@ -342,7 +364,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     if taskIndex < self.queue.count {
                         self.queue[taskIndex].progress = progress
                         let percent = Int(progress * 100)
-                        self.queue[taskIndex].speedText = "% \(percent) (6 Kanallı Hızlı İndirme)"
+                        self.queue[taskIndex].speedText = "% \(percent) (6 Kanallı İndirme)"
                     }
                 }
                 

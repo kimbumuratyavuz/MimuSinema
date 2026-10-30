@@ -32,6 +32,7 @@ public struct CustomPlayerView: View {
     @State private var isPlaying: Bool = true
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
+    @State private var playbackErrorMessage: String? = nil
     
     // Süre
     @State private var currentTime: Double = 0
@@ -78,6 +79,26 @@ public struct CustomPlayerView: View {
                 ProgressView()
                     .tint(.white)
                     .scaleEffect(1.5)
+            }
+            
+            // Oynatma Hatası Varsa Ekranda Göster
+            if let err = playbackErrorMessage {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.yellow)
+                    Text("Oynatma Hatası")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .padding()
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(12)
             }
             
             // 2. JEST KATMANI
@@ -373,24 +394,27 @@ public struct CustomPlayerView: View {
         resetControlsTimer()
     }
     
+    // MARK: - Oynatıcı Yükleme (İndirilen Dosya & Canlı Akış)
     private func loadPlayer() {
         player?.pause()
+        playbackErrorMessage = nil
         
-        let playUrl: URL
-        if let localPath = currentMedia.localRelativePath, FileManager.default.fileExists(atPath: localPath) {
-            playUrl = URL(fileURLWithPath: localPath)
-            let item = AVPlayerItem(url: playUrl)
-            setupPlayerWithItem(item)
-        } else {
-            playUrl = currentMedia.streamUrl
-            var headers: [String: String] = [:]
-            if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
-            if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
-            
-            let asset = AVURLAsset(url: playUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        // 1. ÖNCE CİHAZDA İNDİRİLMİŞ YEREL DOSYA KONTROLÜ
+        if let localUrl = DownloadManagerService.shared.resolvedLocalUrl(for: currentMedia) {
+            let asset = AVURLAsset(url: localUrl)
             let item = AVPlayerItem(asset: asset)
             setupPlayerWithItem(item)
+            return
         }
+        
+        // 2. YEREL DOSYA YOKSA ONLİNE AKIŞI OYNAT
+        var headers: [String: String] = [:]
+        if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
+        if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
+        
+        let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        let item = AVPlayerItem(asset: asset)
+        setupPlayerWithItem(item)
     }
     
     private func setupPlayerWithItem(_ item: AVPlayerItem) {
@@ -413,6 +437,16 @@ public struct CustomPlayerView: View {
         ) { _ in
             if hasNextEpisode {
                 playNextEpisode()
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { notification in
+            if let err = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                self.playbackErrorMessage = err.localizedDescription
             }
         }
         
