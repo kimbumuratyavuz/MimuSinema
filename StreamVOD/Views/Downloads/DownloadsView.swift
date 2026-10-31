@@ -20,7 +20,7 @@ public struct DownloadsView: View {
     
     public var body: some View {
         NavigationView {
-            ZStack {
+            ZStack(alignment: .top) {
                 Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea()
                 
                 VStack(spacing: 0) {
@@ -30,7 +30,9 @@ public struct DownloadsView: View {
                         Text("İndirilenler (\(downloadManager.totalDownloadedCount))").tag(1)
                     }
                     .pickerStyle(.segmented)
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
                     
                     if selectedTab == 0 {
                         queueSectionView
@@ -38,6 +40,7 @@ public struct DownloadsView: View {
                         downloadedLibraryView
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .navigationTitle("İndirme Yöneticisi")
             .navigationBarTitleDisplayMode(.inline)
@@ -146,6 +149,7 @@ public struct DownloadsView: View {
             
             if downloadManager.queue.isEmpty {
                 emptyQueueView
+                Spacer(minLength: 0)
             } else {
                 List {
                     ForEach($downloadManager.queue) { $task in
@@ -252,7 +256,7 @@ public struct DownloadsView: View {
         let seriesGrouped = downloadManager.downloadedSeriesGrouped
         
         return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 18) {
                 // iPhone Dosyalar Uygulaması Bilgi Rozeti
                 HStack(spacing: 12) {
                     Image(systemName: "folder.badge.person.crop")
@@ -273,56 +277,67 @@ public struct DownloadsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
                 .padding(.horizontal)
                 
-                // FİLMLER KLASÖRÜ
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "folder.fill")
-                            .foregroundColor(.yellow)
-                        Text("Film Klasörü (Documents/Movies)")
+                // Hiçbir dosya indirilmemişse bilgi mesajı
+                if movies.isEmpty && seriesGrouped.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 56))
+                            .foregroundColor(.gray)
+                        Text("İndirilmiş İçerik Bulunmuyor")
                             .font(.headline)
                             .foregroundColor(.white)
-                        Spacer()
-                        Text("\(movies.count) film")
+                        Text("İndirdiğiniz filmler ve diziler burada listelenir. İnternet bağlantınız olmasa dahi bu alandan çevrimdışı izleyebilirsiniz.")
                             .font(.caption)
                             .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 36)
                     }
-                    .padding(.horizontal)
-                    
-                    if movies.isEmpty {
-                        Text("Cihazınızda kayıtlı film bulunmuyor.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding(.horizontal)
-                    } else {
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 24)
+                }
+                
+                // FİLMLER KLASÖRÜ
+                if !movies.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "folder.fill")
+                                .foregroundColor(.yellow)
+                            Text("Film Klasörü (Documents/Movies)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            Spacer()
+                            Text("\(movies.count) film")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.horizontal)
+                        
                         ForEach(movies) { item in
                             downloadedItemRow(item: item)
                         }
                     }
                 }
                 
-                Divider().background(Color.gray.opacity(0.3))
+                if !movies.isEmpty && !seriesGrouped.isEmpty {
+                    Divider().background(Color.gray.opacity(0.3))
+                }
                 
                 // DİZİLER KLASÖRÜ
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Image(systemName: "folder.fill")
-                            .foregroundColor(.yellow)
-                        Text("Dizi Klasörü (Documents/Series)")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Spacer()
-                        Text("\(seriesGrouped.keys.count) Dizi")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.horizontal)
-                    
-                    if seriesGrouped.isEmpty {
-                        Text("Cihazınızda kayıtlı dizi bölümü bulunmuyor.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding(.horizontal)
-                    } else {
+                if !seriesGrouped.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Image(systemName: "folder.fill")
+                                .foregroundColor(.yellow)
+                            Text("Dizi Klasörü (Documents/Series)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            Spacer()
+                            Text("\(seriesGrouped.keys.count) Dizi")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.horizontal)
+                        
                         ForEach(Array(seriesGrouped.keys.sorted()), id: \.self) { seriesName in
                             DisclosureGroup {
                                 ForEach(seriesGrouped[seriesName] ?? []) { item in
@@ -369,8 +384,12 @@ public struct DownloadsView: View {
                     }
                 }
             }
-            .padding(.vertical)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.top, 4)
+            .padding(.bottom, 24)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
     }
     
     private func downloadedItemRow(item: DownloadTaskItem) -> some View {
@@ -445,7 +464,7 @@ public struct DownloadsView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
         }
-        .padding(.top, 60)
+        .padding(.top, 24)
     }
     
     private func statusColor(_ status: DownloadStatus) -> Color {

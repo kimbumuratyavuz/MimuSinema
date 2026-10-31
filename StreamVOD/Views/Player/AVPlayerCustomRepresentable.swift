@@ -23,20 +23,27 @@ public enum VideoAspectRatioMode: String, CaseIterable {
     }
 }
 
+public final class CustomPlayerViewController: AVPlayerViewController {
+    public override var prefersHomeIndicatorAutoHidden: Bool {
+        return true
+    }
+}
+
 public struct AVPlayerCustomRepresentable: UIViewControllerRepresentable {
     public let player: AVPlayer
     public var videoGravity: AVLayerVideoGravity
     
-    public func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
+    public func makeUIViewController(context: Context) -> CustomPlayerViewController {
+        let controller = CustomPlayerViewController()
         controller.player = player
         controller.showsPlaybackControls = false // Kendi özel arayüzümüzü kullanıyoruz
         controller.videoGravity = videoGravity
         return controller
     }
     
-    public func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+    public func updateUIViewController(_ uiViewController: CustomPlayerViewController, context: Context) {
         uiViewController.player = player
         uiViewController.videoGravity = videoGravity
+        uiViewController.setNeedsUpdateOfHomeIndicatorAutoHidden()
     }
 }

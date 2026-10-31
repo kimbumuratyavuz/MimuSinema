@@ -624,12 +624,12 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     
     private func markCompleted(taskIndex: Int, localUrl: URL) {
         guard taskIndex < queue.count else { return }
-        queue[taskIndex].status = .completed
-        queue[taskIndex].progress = 1.0
-        queue[taskIndex].localFilePath = localUrl.path
-        queue[taskIndex].mediaItem.localRelativePath = localUrl.lastPathComponent
-        queue[taskIndex].isSelected = false
-        queue[taskIndex].speedText = "Tamamlandı"
+        let completedTask = queue[taskIndex]
+        if currentProcessingId == completedTask.id {
+            currentProcessingId = nil
+        }
+        // İndirme bittiğinde kuyruktan otomatik kaldır (İndirilenler kütüphanesinde korunur)
+        queue.remove(at: taskIndex)
         saveState()
         refreshDownloadedLibrary()
     }
@@ -651,7 +651,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     private func loadSavedState() {
         if let data = UserDefaults.standard.data(forKey: "saved_download_queue"),
            let loaded = try? JSONDecoder().decode([DownloadTaskItem].self, from: data) {
-            self.queue = loaded
+            // Tamamlanmış olanları kuyruktan temizle, sadece bekleyen/devam eden/hata alanları tut
+            self.queue = loaded.filter { $0.status != .completed }
         }
         refreshDownloadedLibrary()
     }

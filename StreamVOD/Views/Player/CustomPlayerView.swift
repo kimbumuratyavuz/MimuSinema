@@ -55,6 +55,11 @@ public struct CustomPlayerView: View {
     @State private var showForwardFeedback: Bool = false
     @State private var showRewindFeedback: Bool = false
     
+    // Kaldığın Yerden Devam Etme Durumu
+    @State private var showResumePrompt: Bool = false
+    @State private var savedResumeTime: Double = 0
+    @State private var hasCheckedSavedProgress: Bool = false
+    
     public init(mediaList: [MediaItem], initialIndex: Int = 0) {
         self.mediaList = mediaList
         self._currentIndex = State(initialValue: initialIndex)
@@ -230,14 +235,96 @@ public struct CustomPlayerView: View {
                 .transition(.opacity)
                 .zIndex(10)
             }
+            
+            // 5. KALDIĞIN YERDEN DEVAM ET DİYALOĞU
+            if showResumePrompt {
+                ZStack {
+                    Color.black.opacity(0.85)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 52))
+                            .foregroundColor(.red)
+                        
+                        Text("İzlemeye Devam Et")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("'\(currentMedia.cleanTitle)' için daha önce **\(formatTime(savedResumeTime))** süresinde kaldınız. Nereden devam etmek istersiniz?")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                        
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                withAnimation {
+                                    showResumePrompt = false
+                                }
+                                PlaybackProgressManager.shared.clearProgress(for: currentMedia)
+                                performSmoothSeek(to: 0)
+                                player?.play()
+                                isPlaying = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "backward.end.fill")
+                                    Text("Baştan Başla")
+                                }
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.2))
+                                .cornerRadius(10)
+                            }
+                            
+                            Button(action: {
+                                withAnimation {
+                                    showResumePrompt = false
+                                }
+                                performSmoothSeek(to: savedResumeTime)
+                                player?.play()
+                                isPlaying = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                    Text("Kaldığın Yerden (\(formatTime(savedResumeTime)))")
+                                }
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 12)
+                                .background(Color.red)
+                                .cornerRadius(10)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .padding(28)
+                    .background(Color(red: 0.12, green: 0.12, blue: 0.15))
+                    .cornerRadius(20)
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.18), lineWidth: 1))
+                    .padding(.horizontal, 24)
+                }
+                .zIndex(100)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
         }
         .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .onAppear {
             configureAudioSession()
             loadPlayer()
             resetControlsTimer()
         }
         .onDisappear {
+            if totalDuration > 0 {
+                PlaybackProgressManager.shared.saveProgress(for: currentMedia, currentTime: currentTime, totalDuration: totalDuration)
+            }
             if isLandscapeMode {
                 OrientationManager.forceOrientation(.portrait)
             }
@@ -417,6 +504,8 @@ public struct CustomPlayerView: View {
         itemObserver?.invalidate()
         itemObserver = nil
         playbackErrorMessage = nil
+        hasCheckedSavedProgress = false
+        showResumePrompt = false
         
         let item: AVPlayerItem
         
@@ -461,7 +550,19 @@ public struct CustomPlayerView: View {
                     if !dur.isNaN && !dur.isInfinite && dur > 0 {
                         self.totalDuration = dur
                     }
-                    if self.isPlaying {
+                    
+                    if !self.hasCheckedSavedProgress {
+                        self.hasCheckedSavedProgress = true
+                        if let saved = PlaybackProgressManager.shared.getSavedProgress(for: self.currentMedia), saved > 10 {
+                            self.savedResumeTime = saved
+                            self.showResumePrompt = true
+                            self.player?.pause()
+                            self.isPlaying = false
+                            return
+                        }
+                    }
+                    
+                    if self.isPlaying && !self.showResumePrompt {
                         self.player?.play()
                     }
                 }
@@ -489,11 +590,14 @@ public struct CustomPlayerView: View {
             }
         }
         
-        p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
+        p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0, preferredTimescale: 600), queue: .main) { time in
             if !isDraggingSlider && !isSeeking {
                 self.currentTime = time.seconds
                 if let dur = p.currentItem?.duration.seconds, !dur.isNaN && !dur.isInfinite && dur > 0 {
                     self.totalDuration = dur
+                }
+                if self.totalDuration > 0 && !self.showResumePrompt {
+                    PlaybackProgressManager.shared.saveProgress(for: self.currentMedia, currentTime: time.seconds, totalDuration: self.totalDuration)
                 }
             }
         }
@@ -503,6 +607,7 @@ public struct CustomPlayerView: View {
             object: item,
             queue: .main
         ) { _ in
+            PlaybackProgressManager.shared.clearProgress(for: self.currentMedia)
             if hasNextEpisode {
                 playNextEpisode()
             }
@@ -517,9 +622,6 @@ public struct CustomPlayerView: View {
                 self.playbackErrorMessage = err.localizedDescription
             }
         }
-        
-        p.play()
-        isPlaying = true
     }
     
     private func togglePlayPause() {
