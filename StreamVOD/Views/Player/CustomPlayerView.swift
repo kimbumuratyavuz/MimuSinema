@@ -35,6 +35,7 @@ public struct CustomPlayerView: View {
     @State private var controlsTimer: Timer?
     @State private var playbackErrorMessage: String? = nil
     @State private var itemObserver: NSKeyValueObservation? = nil
+    @State private var hasAttemptedServerFallback: Bool = false
     
     // Süre & Akıllı Arama Durumları
     @State private var currentTime: Double = 0
@@ -417,13 +418,14 @@ public struct CustomPlayerView: View {
         itemObserver?.invalidate()
         itemObserver = nil
         playbackErrorMessage = nil
+        hasAttemptedServerFallback = false
         
         let item: AVPlayerItem
         
-        // 1. İndirilmiş dosya varsa LocalStreamServer üzerinden HLS veya MP4 olarak oynat
-        if let playbackUrl = DownloadManagerService.shared.playbackUrl(for: currentMedia) {
-            print("[CustomPlayerView] İndirilen yerel akış oynatılıyor: \(playbackUrl)")
-            item = AVPlayerItem(url: playbackUrl)
+        // 1. İndirilmiş dosya varsa doğrudan yerel AVPlayerItem olarak dene (Ağ & sunucu bağımsız)
+        if let directItem = DownloadManagerService.shared.directPlaybackItem(for: currentMedia) {
+            print("[CustomPlayerView] İndirilen yerel medya doğrudan diski bağlayarak yükleniyor...")
+            item = directItem
         } else {
             print("[CustomPlayerView] Uzaktan canlı akış oynatılıyor: \(currentMedia.streamUrl)")
             var headers: [String: String] = [:]
@@ -450,10 +452,22 @@ public struct CustomPlayerView: View {
         
         self.player = p
         
-        // Öğe durumunu izle (Hata olursa ekranda açıkça göster, hazırsa başlat)
+        // Öğe durumunu izle (Hata olursa fallback veya ekranda açıkça göster, hazırsa başlat)
         itemObserver = item.observe(\.status, options: [.new, .initial]) { obsItem, _ in
             DispatchQueue.main.async {
                 if obsItem.status == .failed {
+                    print("[CustomPlayerView] Oynatma başarısız: \(String(describing: obsItem.error))")
+                    
+                    // Doğrudan oynatma başarısız olduysa ve henüz sunucu fallback'i denenmediyse:
+                    if !self.hasAttemptedServerFallback,
+                       let serverUrl = DownloadManagerService.shared.serverPlaybackUrl(for: self.currentMedia) {
+                        self.hasAttemptedServerFallback = true
+                        print("[CustomPlayerView] Yerel HTTP sunucu fallback'i devreye giriyor: \(serverUrl)")
+                        let fallbackItem = AVPlayerItem(url: serverUrl)
+                        self.setupPlayerWithItem(fallbackItem)
+                        return
+                    }
+                    
                     self.playbackErrorMessage = obsItem.error?.localizedDescription ?? "Video oynatılamadı."
                 } else if obsItem.status == .readyToPlay {
                     self.playbackErrorMessage = nil

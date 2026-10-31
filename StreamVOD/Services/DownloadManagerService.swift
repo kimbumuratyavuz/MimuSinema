@@ -200,17 +200,42 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return m3u8Url
     }
     
-    /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
-    public func playbackUrl(for media: MediaItem) -> URL? {
+    /// Doğrudan yerel oynatma için AVPlayerItem üretir (Ağ sunucusu kullanmadan, forbidNone ile diski bağlar)
+    public func directPlaybackItem(for media: MediaItem) -> AVPlayerItem? {
+        guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
+        let ext = localUrl.pathExtension.lowercased()
+        
+        if ext == "mp4" || ext == "m4v" || ext == "mov" {
+            return AVPlayerItem(url: localUrl)
+        }
+        
+        if ext == "ts" {
+            let m3u8Url = ensureM3U8Exists(for: localUrl)
+            let options: [String: Any] = [
+                AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidNone.rawValue
+            ]
+            let asset = AVURLAsset(url: m3u8Url, options: options)
+            return AVPlayerItem(asset: asset)
+        }
+        
+        return AVPlayerItem(url: localUrl)
+    }
+    
+    /// Yerel HTTP Stream Sunucusu üzerinden oynatma URL'si (Fallback için)
+    public func serverPlaybackUrl(for media: MediaItem) -> URL? {
         guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
         let ext = localUrl.pathExtension.lowercased()
         if ext == "ts" {
             let m3u8Url = ensureM3U8Exists(for: localUrl)
             return LocalStreamServer.shared.url(for: m3u8Url)
         } else {
-            // MP4 ve MOV dosyalarını AVPlayer doğrudan yerel dosya olarak donanım hızlandırmalı oynatır
             return localUrl
         }
+    }
+    
+    /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
+    public func playbackUrl(for media: MediaItem) -> URL? {
+        serverPlaybackUrl(for: media)
     }
     
     private func sanitizeFileName(_ name: String) -> String {

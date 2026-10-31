@@ -87,6 +87,43 @@ public final class LocalStreamServer: ObservableObject {
         return fileUrl.lastPathComponent
     }
     
+    // MARK: - Senkron M3U8 Üretici (Thread-Safe & Anında)
+    @discardableResult
+    public static func generateM3U8Synchronously(for tsUrl: URL) -> URL {
+        let m3u8Url = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
+        if FileManager.default.fileExists(atPath: m3u8Url.path) {
+            return m3u8Url
+        }
+        
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tsUrl.path),
+              let totalSize = attrs[.size] as? Int64, totalSize > 0 else {
+            return m3u8Url
+        }
+        
+        let packetSize: Int64 = 188
+        let packetsPerSeg: Int64 = 10_000
+        let segSize: Int64 = packetSize * packetsPerSeg // 1,880,000 bayt (~1.8 MB)
+        let segDuration: Double = 5.0
+        
+        var content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+        var offset: Int64 = 0
+        let fileName = tsUrl.lastPathComponent
+        
+        while offset < totalSize {
+            let remaining = totalSize - offset
+            let currentLen = min(segSize, remaining)
+            content += "#EXT-X-BYTERANGE:\(currentLen)@\(offset)\n"
+            content += String(format: "#EXTINF:%.3f,\n", segDuration)
+            content += "\(fileName)\n"
+            offset += currentLen
+        }
+        
+        content += "#EXT-X-ENDLIST\n"
+        try? content.write(to: m3u8Url, atomically: true, encoding: .utf8)
+        print("[LocalStreamServer] Senkron M3U8 diske yazıldı: \(m3u8Url.lastPathComponent)")
+        return m3u8Url
+    }
+    
     // MARK: - İstek İşleme
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -166,15 +203,11 @@ public final class LocalStreamServer: ObservableObject {
             }
         }
         
-        // 2. Dosya .m3u8 istenmiş ama henüz yoksa fakat .ts dosyası varsa: Anında geçerli byte-range M3U8 üret!
+        // 2. Dosya .m3u8 istenmiş ama henüz yoksa fakat .ts dosyası varsa: Senkron olarak anında M3U8 üret!
         if relPath.lowercased().hasSuffix(".m3u8") && !FileManager.default.fileExists(atPath: fileUrl.path) {
             let tsUrl = fileUrl.deletingPathExtension().appendingPathExtension("ts")
             if FileManager.default.fileExists(atPath: tsUrl.path) {
-                Task { @MainActor in
-                    _ = DownloadManagerService.shared.ensureM3U8Exists(for: tsUrl)
-                }
-                // Diske yazılması için ufak bir bekleme
-                fileUrl = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
+                fileUrl = LocalStreamServer.generateM3U8Synchronously(for: tsUrl)
             }
         }
         
@@ -205,7 +238,7 @@ public final class LocalStreamServer: ObservableObject {
             Connection: close\r\n\
             \r\n
             """
-            connection.send(content: headHeader.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.send(content: headHeader.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
             return
         }
         
@@ -223,7 +256,7 @@ public final class LocalStreamServer: ObservableObject {
                 """
                 var fullRes = header.data(using: .utf8)!
                 fullRes.append(data)
-                connection.send(content: fullRes, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+                connection.send(content: fullRes, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
                 return
             }
         }
@@ -329,6 +362,7 @@ public final class LocalStreamServer: ObservableObject {
     ) {
         guard remainingBytes > 0 else {
             try? handle.close()
+            connection.cancel()
             return
         }
         
@@ -338,6 +372,7 @@ public final class LocalStreamServer: ObservableObject {
             let chunk = handle.readData(ofLength: chunkSize)
             guard !chunk.isEmpty else {
                 try? handle.close()
+                connection.cancel()
                 return
             }
             
@@ -357,6 +392,7 @@ public final class LocalStreamServer: ObservableObject {
                     }
                     if isLast {
                         try? handle.close()
+                        connection.cancel()
                     } else {
                         self.queue.async {
                             self.sendNextChunk(
@@ -377,17 +413,17 @@ public final class LocalStreamServer: ObservableObject {
     
     private func send404(connection: NWConnection) {
         let res = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
     }
     
     private func send400(connection: NWConnection) {
         let res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
     }
     
     private func send500(connection: NWConnection) {
         let res = "HTTP/1.1 500 Internal Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
     }
     
     private func mimeType(for ext: String) -> String {
