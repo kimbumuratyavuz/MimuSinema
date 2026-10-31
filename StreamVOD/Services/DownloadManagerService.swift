@@ -212,7 +212,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         if ext == "ts" {
             let m3u8Url = ensureM3U8Exists(for: localUrl)
             let options: [String: Any] = [
-                AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidNone.rawValue
+                AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions().rawValue
             ]
             let asset = AVURLAsset(url: m3u8Url, options: options)
             return AVPlayerItem(asset: asset)
