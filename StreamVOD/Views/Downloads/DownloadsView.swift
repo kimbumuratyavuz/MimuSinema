@@ -231,7 +231,27 @@ public struct DownloadsView: View {
         let seriesGrouped = Dictionary(grouping: seriesTasks, by: { $0.mediaItem.seriesName ?? "Diziler" })
         
         return ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
+                // iPhone Dosyalar Uygulaması Bilgi Rozeti
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.badge.person.crop")
+                        .foregroundColor(.blue)
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("iPhone 'Dosyalar' Klasörü")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        Text("İndirdiğiniz videolara iPhone'unuzdaki **Dosyalar > iPhone'umda > MimuSinema** klasöründen de doğrudan ulaşabilirsiniz.")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
+                .padding(.horizontal)
+                
                 // FİLMLER KLASÖRÜ
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {

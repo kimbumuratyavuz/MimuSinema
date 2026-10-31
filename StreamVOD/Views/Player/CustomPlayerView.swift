@@ -415,8 +415,8 @@ public struct CustomPlayerView: View {
         
         let item: AVPlayerItem
         
-        if let localUrl = DownloadManagerService.shared.resolvedLocalUrl(for: currentMedia) {
-            let asset = AVURLAsset(url: localUrl)
+        if let localPlaybackUrl = DownloadManagerService.shared.playbackUrl(for: currentMedia) {
+            let asset = AVURLAsset(url: localPlaybackUrl)
             item = AVPlayerItem(asset: asset)
         } else {
             var headers: [String: String] = [:]

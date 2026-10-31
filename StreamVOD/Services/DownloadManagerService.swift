@@ -97,6 +97,18 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return nil
     }
     
+    /// Oynatıcı için yerel akış URL'si (Yerel HTTP sunucusu üzerinden HLS veya MP4 olarak sunar)
+    public func playbackUrl(for media: MediaItem) -> URL? {
+        guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
+        let ext = localUrl.pathExtension.lowercased()
+        if ext == "ts" {
+            let m3u8Url = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
+            return LocalStreamServer.shared.url(for: m3u8Url)
+        } else {
+            return LocalStreamServer.shared.url(for: localUrl)
+        }
+    }
+    
     private func sanitizeFileName(_ name: String) -> String {
         let invalidChars = CharacterSet(charactersIn: "\\/:*?\"<>|")
         return name.components(separatedBy: invalidChars).joined(separator: "_")
@@ -148,9 +160,13 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         
         if let localUrl = resolvedLocalUrl(for: task.mediaItem) {
             try? FileManager.default.removeItem(at: localUrl)
+            let m3u8 = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
+            try? FileManager.default.removeItem(at: m3u8)
         } else {
             let dest = destinationUrl(for: task.mediaItem)
             try? FileManager.default.removeItem(at: dest)
+            let m3u8 = dest.deletingPathExtension().appendingPathExtension("m3u8")
+            try? FileManager.default.removeItem(at: m3u8)
         }
         
         let isSeries = task.mediaItem.isSeries
@@ -313,25 +329,35 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 
                 let lines = content.components(separatedBy: .newlines)
                 var segmentUrls: [URL] = []
+                var segmentDurations: [Double] = []
+                var currentExtinfDuration: Double = 6.0
                 let baseUrl = media.streamUrl.deletingLastPathComponent()
                 
                 var masterPlaylistUrl: URL? = nil
                 for line in lines {
                     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmed.isEmpty { continue }
-                    if !trimmed.hasPrefix("#") {
+                    if trimmed.hasPrefix("#EXTINF:") {
+                        let durStr = trimmed.replacingOccurrences(of: "#EXTINF:", with: "").components(separatedBy: ",")[0]
+                        currentExtinfDuration = Double(durStr) ?? 6.0
+                    } else if !trimmed.hasPrefix("#") {
                         if trimmed.contains(".m3u8") {
                             masterPlaylistUrl = URL(string: trimmed, relativeTo: baseUrl)?.absoluteURL
                             break
                         } else {
                             if let sUrl = URL(string: trimmed, relativeTo: baseUrl)?.absoluteURL {
                                 segmentUrls.append(sUrl)
+                                segmentDurations.append(currentExtinfDuration)
                             }
                         }
                     }
                 }
                 
                 if let master = masterPlaylistUrl {
+                    segmentUrls.removeAll()
+                    segmentDurations.removeAll()
+                    currentExtinfDuration = 6.0
+                    
                     var subReq = URLRequest(url: master)
                     if let ref = media.httpReferrer { subReq.setValue(ref, forHTTPHeaderField: "Referer") }
                     if let ua = media.httpUserAgent { subReq.setValue(ua, forHTTPHeaderField: "User-Agent") }
@@ -342,9 +368,13 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                         let subBase = master.deletingLastPathComponent()
                         for sLine in subLines {
                             let tr = sLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !tr.isEmpty && !tr.hasPrefix("#") {
+                            if tr.hasPrefix("#EXTINF:") {
+                                let durStr = tr.replacingOccurrences(of: "#EXTINF:", with: "").components(separatedBy: ",")[0]
+                                currentExtinfDuration = Double(durStr) ?? 6.0
+                            } else if !tr.isEmpty && !tr.hasPrefix("#") {
                                 if let seg = URL(string: tr, relativeTo: subBase)?.absoluteURL {
                                     segmentUrls.append(seg)
+                                    segmentDurations.append(currentExtinfDuration)
                                 }
                             }
                         }
@@ -365,6 +395,9 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 let totalSegments = segmentUrls.count
                 var completedSegments = 0
                 let chunkSize = self.concurrentWorkers
+                
+                var byteRangeEntries: [(duration: Double, length: Int, offset: Int)] = []
+                var currentByteOffset = 0
                 
                 for chunkStart in stride(from: 0, to: totalSegments, by: chunkSize) {
                     if self.isCancelled { break }
@@ -396,8 +429,11 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     
                     // RAM boşaltma: Diske senkron yazarken autoreleasepool ile bellek temizlenir
                     autoreleasepool {
-                        for (_, segData) in downloadedBatch {
+                        for (idx, segData) in downloadedBatch {
                             fileHandle.write(segData)
+                            let dur = idx < segmentDurations.count ? segmentDurations[idx] : 6.0
+                            byteRangeEntries.append((duration: dur, length: segData.count, offset: currentByteOffset))
+                            currentByteOffset += segData.count
                         }
                     }
                     
@@ -432,6 +468,17 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     try? FileManager.default.removeItem(at: destination)
                 }
                 try FileManager.default.moveItem(at: tempDestination, to: destination)
+                
+                // HLS için kusursuz ve anında oynatılabilir standart .m3u8 index dosyasını oluştur
+                let m3u8Destination = destination.deletingPathExtension().appendingPathExtension("m3u8")
+                var m3u8Content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:15\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+                for entry in byteRangeEntries.sorted(by: { $0.offset < $1.offset }) {
+                    m3u8Content += "#EXT-X-BYTERANGE:\(entry.length)@\(entry.offset)\n"
+                    m3u8Content += String(format: "#EXTINF:%.3f,\n", entry.duration)
+                    m3u8Content += "\(destination.lastPathComponent)\n"
+                }
+                m3u8Content += "#EXT-X-ENDLIST\n"
+                try? m3u8Content.write(to: m3u8Destination, atomically: true, encoding: .utf8)
                 
                 self.markCompleted(taskIndex: taskIndex, localUrl: destination)
                 self.processNextInQueue()

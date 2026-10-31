@@ -16,6 +16,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         } catch {
             print("AVAudioSession error: \(error.localizedDescription)")
         }
+        
+        // Yerel HTTP Stream Sunucusunu başlat (İndirilen HLS/.ts videolarının offline kusursuz oynatımı için)
+        _ = LocalStreamServer.shared
+        
         return true
     }
 }
