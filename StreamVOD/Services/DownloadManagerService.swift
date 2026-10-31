@@ -162,15 +162,54 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return nil
     }
     
-    /// Oynatıcı için yerel akış URL'si (Yerel HTTP sunucusu üzerinden HLS veya MP4 olarak sunar)
+    /// TS dosyası için anında standart byte-range M3U8 index dosyası oluşturur / doğrular
+    @discardableResult
+    public func ensureM3U8Exists(for tsUrl: URL) -> URL {
+        let m3u8Url = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
+        if FileManager.default.fileExists(atPath: m3u8Url.path) {
+            return m3u8Url
+        }
+        
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tsUrl.path),
+              let totalSize = attrs[.size] as? Int64, totalSize > 0 else {
+            return m3u8Url
+        }
+        
+        // MPEG-TS paket boyutu: 188 bayt. Her sanal segment yaklaşık 1.88 MB (~5 saniye video)
+        let packetSize: Int64 = 188
+        let packetsPerSeg: Int64 = 10_000
+        let segSize: Int64 = packetSize * packetsPerSeg // 1,880,000 bayt
+        let segDuration: Double = 5.0
+        
+        var content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+        var offset: Int64 = 0
+        let fileName = tsUrl.lastPathComponent
+        
+        while offset < totalSize {
+            let remaining = totalSize - offset
+            let currentLen = min(segSize, remaining)
+            content += "#EXT-X-BYTERANGE:\(currentLen)@\(offset)\n"
+            content += String(format: "#EXTINF:%.3f,\n", segDuration)
+            content += "\(fileName)\n"
+            offset += currentLen
+        }
+        
+        content += "#EXT-X-ENDLIST\n"
+        try? content.write(to: m3u8Url, atomically: true, encoding: .utf8)
+        print("[DownloadManager] M3U8 index dosyası başarıyla üretildi: \(m3u8Url.lastPathComponent)")
+        return m3u8Url
+    }
+    
+    /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
     public func playbackUrl(for media: MediaItem) -> URL? {
         guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
         let ext = localUrl.pathExtension.lowercased()
         if ext == "ts" {
-            let m3u8Url = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
+            let m3u8Url = ensureM3U8Exists(for: localUrl)
             return LocalStreamServer.shared.url(for: m3u8Url)
         } else {
-            return LocalStreamServer.shared.url(for: localUrl)
+            // MP4 ve MOV dosyalarını AVPlayer doğrudan yerel dosya olarak donanım hızlandırmalı oynatır
+            return localUrl
         }
     }
     

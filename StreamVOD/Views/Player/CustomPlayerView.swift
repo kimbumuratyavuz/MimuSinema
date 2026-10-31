@@ -457,8 +457,24 @@ public struct CustomPlayerView: View {
                     self.playbackErrorMessage = obsItem.error?.localizedDescription ?? "Video oynatılamadı."
                 } else if obsItem.status == .readyToPlay {
                     self.playbackErrorMessage = nil
+                    let dur = obsItem.duration.seconds
+                    if !dur.isNaN && !dur.isInfinite && dur > 0 {
+                        self.totalDuration = dur
+                    }
                     if self.isPlaying {
                         self.player?.play()
+                    }
+                }
+            }
+        }
+        
+        // Süre Bilgisini (Duration) Asenkron Olarak da Al
+        Task {
+            if let duration = try? await item.asset.load(.duration) {
+                let dur = duration.seconds
+                if !dur.isNaN && !dur.isInfinite && dur > 0 {
+                    await MainActor.run {
+                        self.totalDuration = dur
                     }
                 }
             }
@@ -476,7 +492,7 @@ public struct CustomPlayerView: View {
         p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
             if !isDraggingSlider && !isSeeking {
                 self.currentTime = time.seconds
-                if let dur = p.currentItem?.duration.seconds, !dur.isNaN {
+                if let dur = p.currentItem?.duration.seconds, !dur.isNaN && !dur.isInfinite && dur > 0 {
                     self.totalDuration = dur
                 }
             }
