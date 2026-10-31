@@ -11,6 +11,14 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     @Published public var isDownloading: Bool = false
     @Published public var currentProcessingId: UUID? = nil
     
+    // Cihazda kalıcı olarak indirilmiş içerikler (Kuyruktan bağımsızdır, kuyruk silinse bile korunur)
+    @Published public var downloadedMovies: [DownloadTaskItem] = []
+    @Published public var downloadedSeriesGrouped: [String: [DownloadTaskItem]] = [:]
+    
+    public var totalDownloadedCount: Int {
+        downloadedMovies.count + downloadedSeriesGrouped.values.reduce(0, { $0 + $1.count })
+    }
+    
     private var activeDownloadTask: URLSessionDownloadTask?
     private var isCancelled: Bool = false
     private var urlSession: URLSession!
@@ -166,12 +174,15 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     @discardableResult
     public func ensureM3U8Exists(for tsUrl: URL) -> URL {
         let m3u8Url = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
-        if FileManager.default.fileExists(atPath: m3u8Url.path) {
-            return m3u8Url
-        }
         
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: tsUrl.path),
               let totalSize = attrs[.size] as? Int64, totalSize > 0 else {
+            return m3u8Url
+        }
+        
+        // Eğer m3u8 zaten varsa ve içinde BYTERANGE varsa tekrar yazmaya gerek yok
+        if let existing = try? String(contentsOf: m3u8Url, encoding: .utf8),
+           existing.contains("#EXT-X-BYTERANGE:") && existing.contains("#EXT-X-ENDLIST") {
             return m3u8Url
         }
         
@@ -200,29 +211,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return m3u8Url
     }
     
-    /// Doğrudan yerel oynatma için AVPlayerItem üretir (Ağ sunucusu kullanmadan, forbidNone ile diski bağlar)
-    public func directPlaybackItem(for media: MediaItem) -> AVPlayerItem? {
-        guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
-        let ext = localUrl.pathExtension.lowercased()
-        
-        if ext == "mp4" || ext == "m4v" || ext == "mov" {
-            return AVPlayerItem(url: localUrl)
-        }
-        
-        if ext == "ts" {
-            let m3u8Url = ensureM3U8Exists(for: localUrl)
-            let options: [String: Any] = [
-                AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions().rawValue
-            ]
-            let asset = AVURLAsset(url: m3u8Url, options: options)
-            return AVPlayerItem(asset: asset)
-        }
-        
-        return AVPlayerItem(url: localUrl)
-    }
-    
-    /// Yerel HTTP Stream Sunucusu üzerinden oynatma URL'si (Fallback için)
-    public func serverPlaybackUrl(for media: MediaItem) -> URL? {
+    /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
+    public func playbackUrl(for media: MediaItem) -> URL? {
         guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
         let ext = localUrl.pathExtension.lowercased()
         if ext == "ts" {
@@ -231,11 +221,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         } else {
             return localUrl
         }
-    }
-    
-    /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
-    public func playbackUrl(for media: MediaItem) -> URL? {
-        serverPlaybackUrl(for: media)
     }
     
     private func sanitizeFileName(_ name: String) -> String {
@@ -275,8 +260,10 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Silme İşlemleri
-    public func deleteDownloadedItem(id: UUID) {
+    // MARK: - Kuyruk ve Dosya Yönetimi
+    
+    /// Yalnızca indirme kuyruğundan görevi kaldırır. Cihazdaki video dosyasını ASLA silmez!
+    public func removeFromQueue(id: UUID) {
         guard let idx = queue.firstIndex(where: { $0.id == id }) else { return }
         let task = queue[idx]
         
@@ -285,27 +272,53 @@ public final class DownloadManagerService: NSObject, ObservableObject {
             activeDownloadTask?.cancel()
             isDownloading = false
             currentProcessingId = nil
+            stopBackgroundProtection()
         }
-        
-        if let localUrl = resolvedLocalUrl(for: task.mediaItem) {
-            try? FileManager.default.removeItem(at: localUrl)
-            let m3u8 = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
-            try? FileManager.default.removeItem(at: m3u8)
-        } else {
-            let dest = destinationUrl(for: task.mediaItem)
-            try? FileManager.default.removeItem(at: dest)
-            let m3u8 = dest.deletingPathExtension().appendingPathExtension("m3u8")
-            try? FileManager.default.removeItem(at: m3u8)
-        }
-        
-        let isSeries = task.mediaItem.isSeries
-        let seriesName = task.mediaItem.seriesName ?? "Diziler"
         
         queue.remove(at: idx)
         saveState()
+        refreshDownloadedLibrary()
+    }
+    
+    /// Cihaz hafızasındaki indirilmiş dosyayı kalıcı olarak siler
+    public func deleteDownloadedFile(item: DownloadTaskItem) {
+        if let localUrl = resolvedLocalUrl(for: item.mediaItem) {
+            try? FileManager.default.removeItem(at: localUrl)
+            let m3u8 = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
+            try? FileManager.default.removeItem(at: m3u8)
+        } else if let savedPath = item.localFilePath {
+            let u = URL(fileURLWithPath: savedPath)
+            try? FileManager.default.removeItem(at: u)
+            let m3u8 = u.deletingPathExtension().appendingPathExtension("m3u8")
+            try? FileManager.default.removeItem(at: m3u8)
+        }
         
-        if isSeries {
+        // Eğer kuyrukta varsa oradan da kaldır
+        if let idx = queue.firstIndex(where: { $0.id == item.id }) {
+            queue.remove(at: idx)
+            saveState()
+        }
+        
+        let isSeries = item.mediaItem.isSeries
+        if isSeries, let seriesName = item.mediaItem.seriesName {
             cleanupEmptySeriesFolder(seriesName: seriesName)
+        }
+        
+        refreshDownloadedLibrary()
+    }
+    
+    public func deleteDownloadedItem(id: UUID) {
+        if let task = queue.first(where: { $0.id == id }) {
+            deleteDownloadedFile(item: task)
+        } else if let movie = downloadedMovies.first(where: { $0.id == id }) {
+            deleteDownloadedFile(item: movie)
+        } else {
+            for (_, episodes) in downloadedSeriesGrouped {
+                if let ep = episodes.first(where: { $0.id == id }) {
+                    deleteDownloadedFile(item: ep)
+                    return
+                }
+            }
         }
     }
     
@@ -315,6 +328,8 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         for task in tasksToDelete {
             if let localUrl = resolvedLocalUrl(for: task.mediaItem) {
                 try? FileManager.default.removeItem(at: localUrl)
+                let m3u8 = localUrl.deletingPathExtension().appendingPathExtension("m3u8")
+                try? FileManager.default.removeItem(at: m3u8)
             }
             if let idx = queue.firstIndex(where: { $0.id == task.id }) {
                 queue.remove(at: idx)
@@ -327,6 +342,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
         
         saveState()
+        refreshDownloadedLibrary()
     }
     
     private func cleanupEmptySeriesFolder(seriesName: String) {
@@ -648,6 +664,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         queue[taskIndex].isSelected = false
         queue[taskIndex].speedText = "Tamamlandı"
         saveState()
+        refreshDownloadedLibrary()
     }
     
     private func markFailed(taskIndex: Int, error: String) {
@@ -669,5 +686,87 @@ public final class DownloadManagerService: NSObject, ObservableObject {
            let loaded = try? JSONDecoder().decode([DownloadTaskItem].self, from: data) {
             self.queue = loaded
         }
+        refreshDownloadedLibrary()
+    }
+    
+    // MARK: - Disk Dosya Taraması (Kuyruktan bağımsız İndirilenler Kütüphanesi)
+    public func refreshDownloadedLibrary() {
+        var movies: [DownloadTaskItem] = []
+        var seriesMap: [String: [DownloadTaskItem]] = [:]
+        
+        // 1. Movies klasöründeki dosyaları tara
+        if let movieFiles = try? FileManager.default.contentsOfDirectory(atPath: moviesDirectory.path) {
+            for file in movieFiles {
+                let ext = URL(fileURLWithPath: file).pathExtension.lowercased()
+                guard ext == "ts" || ext == "mp4" || ext == "m4v" || ext == "mov" else { continue }
+                let fullPath = moviesDirectory.appendingPathComponent(file)
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: fullPath.path),
+                      let size = attrs[.size] as? Int64, size > 1024 * 1024 else { continue }
+                
+                let rawTitle = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+                if let existing = queue.first(where: {
+                    $0.mediaItem.cleanTitle == rawTitle ||
+                    $0.mediaItem.title == rawTitle ||
+                    ($0.localFilePath != nil && URL(fileURLWithPath: $0.localFilePath!).lastPathComponent == file)
+                }) {
+                    var item = existing
+                    item.status = .completed
+                    item.localFilePath = fullPath.path
+                    movies.append(item)
+                } else {
+                    let media = MediaItem(title: rawTitle, streamUrl: fullPath, isSeries: false, localRelativePath: "Movies/\(file)")
+                    var task = DownloadTaskItem(mediaItem: media)
+                    task.status = .completed
+                    task.progress = 1.0
+                    task.localFilePath = fullPath.path
+                    movies.append(task)
+                }
+            }
+        }
+        
+        // 2. Series klasöründeki alt klasör ve bölümleri tara
+        if let seriesFolders = try? FileManager.default.contentsOfDirectory(atPath: seriesDirectory.path) {
+            for sFolder in seriesFolders {
+                let folderUrl = seriesDirectory.appendingPathComponent(sFolder)
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: folderUrl.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                
+                if let episodeFiles = try? FileManager.default.contentsOfDirectory(atPath: folderUrl.path) {
+                    var episodes: [DownloadTaskItem] = []
+                    for eFile in episodeFiles {
+                        let ext = URL(fileURLWithPath: eFile).pathExtension.lowercased()
+                        guard ext == "ts" || ext == "mp4" || ext == "m4v" || ext == "mov" else { continue }
+                        let fullPath = folderUrl.appendingPathComponent(eFile)
+                        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fullPath.path),
+                              let size = attrs[.size] as? Int64, size > 1024 * 1024 else { continue }
+                        
+                        let rawTitle = URL(fileURLWithPath: eFile).deletingPathExtension().lastPathComponent
+                        if let existing = queue.first(where: {
+                            $0.mediaItem.cleanTitle == rawTitle ||
+                            $0.mediaItem.title == rawTitle ||
+                            ($0.localFilePath != nil && URL(fileURLWithPath: $0.localFilePath!).lastPathComponent == eFile)
+                        }) {
+                            var item = existing
+                            item.status = .completed
+                            item.localFilePath = fullPath.path
+                            episodes.append(item)
+                        } else {
+                            let media = MediaItem(title: rawTitle, streamUrl: fullPath, isSeries: true, seriesName: sFolder, localRelativePath: "Series/\(sFolder)/\(eFile)")
+                            var task = DownloadTaskItem(mediaItem: media)
+                            task.status = .completed
+                            task.progress = 1.0
+                            task.localFilePath = fullPath.path
+                            episodes.append(task)
+                        }
+                    }
+                    if !episodes.isEmpty {
+                        seriesMap[sFolder] = episodes
+                    }
+                }
+            }
+        }
+        
+        self.downloadedMovies = movies
+        self.downloadedSeriesGrouped = seriesMap
     }
 }

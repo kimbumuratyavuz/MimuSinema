@@ -91,12 +91,15 @@ public final class LocalStreamServer: ObservableObject {
     @discardableResult
     public static func generateM3U8Synchronously(for tsUrl: URL) -> URL {
         let m3u8Url = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
-        if FileManager.default.fileExists(atPath: m3u8Url.path) {
-            return m3u8Url
-        }
         
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: tsUrl.path),
               let totalSize = attrs[.size] as? Int64, totalSize > 0 else {
+            return m3u8Url
+        }
+        
+        // Eğer m3u8 zaten varsa ve geçerliyse tekrar oluşturma
+        if let existing = try? String(contentsOf: m3u8Url, encoding: .utf8),
+           existing.contains("#EXT-X-BYTERANGE:") && existing.contains("#EXT-X-ENDLIST") {
             return m3u8Url
         }
         
@@ -238,7 +241,7 @@ public final class LocalStreamServer: ObservableObject {
             Connection: close\r\n\
             \r\n
             """
-            connection.send(content: headHeader.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
+            connection.send(content: headHeader.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
             return
         }
         
@@ -256,7 +259,7 @@ public final class LocalStreamServer: ObservableObject {
                 """
                 var fullRes = header.data(using: .utf8)!
                 fullRes.append(data)
-                connection.send(content: fullRes, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
+                connection.send(content: fullRes, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
                 return
             }
         }
@@ -362,7 +365,6 @@ public final class LocalStreamServer: ObservableObject {
     ) {
         guard remainingBytes > 0 else {
             try? handle.close()
-            connection.cancel()
             return
         }
         
@@ -372,7 +374,6 @@ public final class LocalStreamServer: ObservableObject {
             let chunk = handle.readData(ofLength: chunkSize)
             guard !chunk.isEmpty else {
                 try? handle.close()
-                connection.cancel()
                 return
             }
             
@@ -387,12 +388,11 @@ public final class LocalStreamServer: ObservableObject {
                 completion: .contentProcessed({ [weak self] error in
                     guard let self = self, error == nil else {
                         try? handle.close()
-                        connection.cancel()
                         return
                     }
                     if isLast {
                         try? handle.close()
-                        connection.cancel()
+                        // .finalMessage ile TCP FIN tamamlanır; connection.cancel() çağırma (RST'yi önle!)
                     } else {
                         self.queue.async {
                             self.sendNextChunk(
@@ -407,23 +407,22 @@ public final class LocalStreamServer: ObservableObject {
             )
         } catch {
             try? handle.close()
-            connection.cancel()
         }
     }
     
     private func send404(connection: NWConnection) {
         let res = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
     }
     
     private func send400(connection: NWConnection) {
         let res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
     }
     
     private func send500(connection: NWConnection) {
         let res = "HTTP/1.1 500 Internal Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in connection.cancel() }))
+        connection.send(content: res.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
     }
     
     private func mimeType(for ext: String) -> String {

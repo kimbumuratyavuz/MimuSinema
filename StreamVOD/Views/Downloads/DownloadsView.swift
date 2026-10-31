@@ -7,7 +7,11 @@ public struct DownloadsView: View {
     // Oynatıcı Durumu
     @State private var playingItem: MediaItem? = nil
     
-    // Silme Onay Durumları
+    // Kuyruktan Kaldırma Onay Durumları (Dosya silinmez!)
+    @State private var showRemoveQueueAlert: Bool = false
+    @State private var itemToRemoveFromQueue: DownloadTaskItem? = nil
+    
+    // Cihazdan Kalıcı Silme Onay Durumları (İndirilenler Sekmesi)
     @State private var showDeleteFileAlert: Bool = false
     @State private var itemToDelete: DownloadTaskItem? = nil
     
@@ -22,8 +26,8 @@ public struct DownloadsView: View {
                 VStack(spacing: 0) {
                     // Segment Seçici
                     Picker("Sayfa", selection: $selectedTab) {
-                        Text("Kuyruk (\(downloadManager.queue.filter { $0.status != .completed }.count))").tag(0)
-                        Text("İndirilenler (\(downloadManager.queue.filter { $0.status == .completed }.count))").tag(1)
+                        Text("Kuyruk (\(downloadManager.queue.count))").tag(0)
+                        Text("İndirilenler (\(downloadManager.totalDownloadedCount))").tag(1)
                     }
                     .pickerStyle(.segmented)
                     .padding()
@@ -37,14 +41,33 @@ public struct DownloadsView: View {
             }
             .navigationTitle("İndirme Yöneticisi")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                downloadManager.refreshDownloadedLibrary()
+            }
             .fullScreenCover(item: $playingItem) { item in
                 CustomPlayerView(mediaList: [item], initialIndex: 0)
             }
-            // 1. Tekil Dosya / Bölüm Silme Onay Uyarısı
-            .alert("Dosyayı Sil", isPresented: $showDeleteFileAlert) {
-                Button("Sil", role: .destructive) {
+            // 1. Kuyruktan Kaldırma Uyarısı (Dosya silinmez)
+            .alert("Kuyruktan Kaldır", isPresented: $showRemoveQueueAlert) {
+                Button("Kuyruktan Kaldır", role: .destructive) {
+                    if let item = itemToRemoveFromQueue {
+                        downloadManager.removeFromQueue(id: item.id)
+                        itemToRemoveFromQueue = nil
+                    }
+                }
+                Button("Vazgeç", role: .cancel) {
+                    itemToRemoveFromQueue = nil
+                }
+            } message: {
+                if let item = itemToRemoveFromQueue {
+                    Text("'\(item.mediaItem.cleanTitle)' indirme kuyruğundan kaldırılacaktır. Varsa indirilmiş video dosyanız silinmez.")
+                }
+            }
+            // 2. Cihaz Hafızasından Kalıcı Silme Onay Uyarısı
+            .alert("Cihazdan Kalıcı Olarak Sil", isPresented: $showDeleteFileAlert) {
+                Button("Kalıcı Olarak Sil", role: .destructive) {
                     if let item = itemToDelete {
-                        downloadManager.deleteDownloadedItem(id: item.id)
+                        downloadManager.deleteDownloadedFile(item: item)
                         itemToDelete = nil
                     }
                 }
@@ -58,7 +81,7 @@ public struct DownloadsView: View {
                     Text("Bu içeriği silmek istediğinize emin misiniz?")
                 }
             }
-            // 2. Tüm Diziyi ve Klasörünü Silme Onay Uyarısı
+            // 3. Tüm Diziyi ve Klasörünü Silme Onay Uyarısı
             .alert("Diziyi ve Klasörünü Sil", isPresented: $showDeleteSeriesAlert) {
                 Button("Tümünü Sil", role: .destructive) {
                     if let sName = seriesNameToDelete {
@@ -201,14 +224,14 @@ public struct DownloadsView: View {
                                 .buttonStyle(.plain)
                             }
                             
-                            // Silme Butonu (Çöp Kutusu)
+                            // Kuyruktan Kaldırma Butonu (Dosya silmez!)
                             Button(action: {
-                                itemToDelete = task
-                                showDeleteFileAlert = true
+                                itemToRemoveFromQueue = task
+                                showRemoveQueueAlert = true
                             }) {
-                                Image(systemName: "trash")
-                                    .font(.subheadline)
-                                    .foregroundColor(.red.opacity(0.8))
+                                Image(systemName: "xmark.circle")
+                                    .font(.title3)
+                                    .foregroundColor(.gray.opacity(0.8))
                                     .padding(6)
                             }
                             .buttonStyle(.plain)
@@ -225,10 +248,8 @@ public struct DownloadsView: View {
     // MARK: - 2. İNDİRİLENLER / KLASÖR GÖRÜNÜMÜ
     
     private var downloadedLibraryView: some View {
-        let completed = downloadManager.queue.filter { $0.status == .completed }
-        let movies = completed.filter { !$0.mediaItem.isSeries }
-        let seriesTasks = completed.filter { $0.mediaItem.isSeries }
-        let seriesGrouped = Dictionary(grouping: seriesTasks, by: { $0.mediaItem.seriesName ?? "Diziler" })
+        let movies = downloadManager.downloadedMovies
+        let seriesGrouped = downloadManager.downloadedSeriesGrouped
         
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -388,7 +409,7 @@ public struct DownloadsView: View {
             }
             .buttonStyle(.plain)
             
-            // Tekil Silme Butonu (Onay uyarılı)
+            // Cihazdan Kalıcı Silme Butonu
             Button(action: {
                 itemToDelete = item
                 showDeleteFileAlert = true
@@ -409,21 +430,22 @@ public struct DownloadsView: View {
     }
     
     private var emptyQueueView: some View {
-        VStack(spacing: 12) {
-            Spacer()
+        VStack(spacing: 16) {
             Image(systemName: "tray")
-                .font(.system(size: 48))
+                .font(.system(size: 60))
                 .foregroundColor(.gray)
-            Text("İndirme kuyruğunuz boş")
+            
+            Text("İndirme Kuyruğu Boş")
                 .font(.headline)
                 .foregroundColor(.white)
-            Text("Film veya dizi bölümlerinin altındaki 'İndir' butonuna dokunarak kuyruğa ekleyebilirsiniz.")
+            
+            Text("Film veya dizi detay sayfalarından 'İndir' butonuna basarak içerikleri bu kuyruğa ekleyebilirsiniz.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
+                .padding(.horizontal, 40)
         }
+        .padding(.top, 60)
     }
     
     private func statusColor(_ status: DownloadStatus) -> Color {
