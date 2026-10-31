@@ -18,7 +18,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     // Arka plan görevi kimliği
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     
-    // RAM şişmesini önlemek için kontrollü eşzamanlı kanal sayısı (4 kanal stabil)
+    // RAM şişmesini önlemek için kontrollü eşzamanlı kanal sayısı (4 kanal)
     private let concurrentWorkers = 4
     
     private override init() {
@@ -55,7 +55,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         return dir
     }
     
-    // Her içerik için hedef dosya URL'si
     public func destinationUrl(for media: MediaItem) -> URL {
         let sanitizedTitle = sanitizeFileName(media.cleanTitle.isEmpty ? media.title : media.cleanTitle)
         let isHls = media.streamUrl.absoluteString.lowercased().contains("m3u8")
@@ -69,7 +68,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
     }
     
-    /// Dinamik yerel dosya çözücü (Dosya gerçekten var ve boyutu 1MB'dan büyük mü kontrol eder)
+    /// Dinamik yerel dosya çözücü (Dosya var ve boyutu 1MB'dan büyük mü kontrol eder)
     public func resolvedLocalUrl(for media: MediaItem) -> URL? {
         let target = destinationUrl(for: media)
         if FileManager.default.fileExists(atPath: target.path) {
@@ -79,7 +78,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
             }
         }
         
-        // Alternatif göreceli yol kontrolü
         if let rel = media.localRelativePath {
             let direct = URL(fileURLWithPath: rel)
             if FileManager.default.fileExists(atPath: direct.path) {
@@ -216,10 +214,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     }
     
     private func startBackgroundProtection() {
-        // 1. Ekranın uykuya dalmasını engelle (indirme bitene kadar ekran kapanmaz)
         UIApplication.shared.isIdleTimerDisabled = true
-        
-        // 2. iOS'un uygulamayı arka planda öldürmesini engelle
         if backgroundTaskId == .invalid {
             backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "MimuSinemaDownloader") { [weak self] in
                 self?.stopBackgroundProtection()
@@ -316,7 +311,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     throw NSError(domain: "MimuSinema", code: -1, userInfo: [NSLocalizedDescriptionKey: "Playlist indirilemedi (HTTP Hata)."])
                 }
                 
-                // M3U8 çözümleme
                 let lines = content.components(separatedBy: .newlines)
                 var segmentUrls: [URL] = []
                 let baseUrl = media.streamUrl.deletingLastPathComponent()
@@ -337,7 +331,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     }
                 }
                 
-                // Alt master playlist varsa onu al
                 if let master = masterPlaylistUrl {
                     var subReq = URLRequest(url: master)
                     if let ref = media.httpReferrer { subReq.setValue(ref, forHTTPHeaderField: "Referer") }
@@ -362,7 +355,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     throw NSError(domain: "MimuSinema", code: -2, userInfo: [NSLocalizedDescriptionKey: "Video parçaları bulunamadı."])
                 }
                 
-                // Hedef geçici dosyayı hazırla
                 let tempDestination = destination.deletingLastPathComponent().appendingPathComponent("temp_\(destination.lastPathComponent)")
                 if FileManager.default.fileExists(atPath: tempDestination.path) {
                     try? FileManager.default.removeItem(at: tempDestination)
@@ -374,44 +366,42 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 var completedSegments = 0
                 let chunkSize = self.concurrentWorkers
                 
-                // 4'erli partiler halinde indirme (RAM Taşmasını & OOM Kapanmasını Önler)
                 for chunkStart in stride(from: 0, to: totalSegments, by: chunkSize) {
                     if self.isCancelled { break }
                     
                     let chunkEnd = min(chunkStart + chunkSize, totalSegments)
                     let currentBatch = Array(segmentUrls[chunkStart..<chunkEnd])
                     
-                    // Otomatik bellek havuzu temizliği
-                    try await autoreleasepool {
-                        let downloadedBatch = try await withThrowingTaskGroup(of: (Int, Data?).self) { group in
-                            for (localIdx, segUrl) in currentBatch.enumerated() {
-                                let globalIdx = chunkStart + localIdx
-                                group.addTask {
-                                    return await self.fetchSingleSegmentWithRetry(
-                                        url: segUrl,
-                                        referrer: media.httpReferrer,
-                                        userAgent: media.httpUserAgent,
-                                        index: globalIdx
-                                    )
-                                }
+                    let downloadedBatch = try await withThrowingTaskGroup(of: (Int, Data?).self) { group in
+                        for (localIdx, segUrl) in currentBatch.enumerated() {
+                            let globalIdx = chunkStart + localIdx
+                            group.addTask {
+                                return await self.fetchSingleSegmentWithRetry(
+                                    url: segUrl,
+                                    referrer: media.httpReferrer,
+                                    userAgent: media.httpUserAgent,
+                                    index: globalIdx
+                                )
                             }
-                            
-                            var batchResults: [(Int, Data)] = []
-                            for try await (idx, segDataOpt) in group {
-                                if let data = segDataOpt, data.count > 512 {
-                                    batchResults.append((idx, data))
-                                }
-                            }
-                            return batchResults.sorted(by: { $0.0 < $1.0 })
                         }
                         
-                        // İnen parçaları anında diske yaz ve RAM'den boşalt
+                        var batchResults: [(Int, Data)] = []
+                        for try await (idx, segDataOpt) in group {
+                            if let data = segDataOpt, data.count > 512 {
+                                batchResults.append((idx, data))
+                            }
+                        }
+                        return batchResults.sorted(by: { $0.0 < $1.0 })
+                    }
+                    
+                    // RAM boşaltma: Diske senkron yazarken autoreleasepool ile bellek temizlenir
+                    autoreleasepool {
                         for (_, segData) in downloadedBatch {
                             fileHandle.write(segData)
                         }
-                        
-                        completedSegments += downloadedBatch.count
                     }
+                    
+                    completedSegments += downloadedBatch.count
                     
                     let progress = Double(completedSegments) / Double(totalSegments)
                     if taskIndex < self.queue.count {
@@ -429,7 +419,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     return
                 }
                 
-                // İndirilen dosyanın doğrulanması (En az 1MB olmalı)
+                // İndirilen dosya boyutu kontrolü (En az 1MB olmalı)
                 let attrs = try? FileManager.default.attributesOfItem(atPath: tempDestination.path)
                 let finalSize = (attrs?[.size] as? Int64) ?? 0
                 
@@ -438,7 +428,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     throw NSError(domain: "MimuSinema", code: -3, userInfo: [NSLocalizedDescriptionKey: "Video verisi eksik indirildi."])
                 }
                 
-                // Başarılı: Geçici dosyayı asıl hedef dosyaya taşı
                 if FileManager.default.fileExists(atPath: destination.path) {
                     try? FileManager.default.removeItem(at: destination)
                 }
@@ -454,7 +443,6 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
     }
     
-    // Tek bir segmenti hata durumunda 2 kez tekrar deneyen güvenli indirici
     private func fetchSingleSegmentWithRetry(url: URL, referrer: String?, userAgent: String?, index: Int) async -> (Int, Data?) {
         for attempt in 1...2 {
             do {
@@ -469,7 +457,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 }
             } catch {
                 if attempt == 2 { return (index, nil) }
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 sn bekle ve tekrar dene
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
         return (index, nil)
