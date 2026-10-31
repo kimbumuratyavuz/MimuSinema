@@ -390,7 +390,6 @@ public struct DownloadsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
-    }
     
     private func downloadedItemRow(item: DownloadTaskItem) -> some View {
         HStack {
