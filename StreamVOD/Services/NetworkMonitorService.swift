@@ -20,7 +20,7 @@ public final class NetworkMonitorService: ObservableObject {
     
     public func startMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 guard let self = self else { return }
                 let reachable = (path.status == .satisfied)
                 self.isConnected = reachable

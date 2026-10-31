@@ -30,8 +30,15 @@ public final class CustomPlayerViewController: AVPlayerViewController {
 }
 
 public struct AVPlayerCustomRepresentable: UIViewControllerRepresentable {
+    public typealias UIViewControllerType = CustomPlayerViewController
+    
     public let player: AVPlayer
     public var videoGravity: AVLayerVideoGravity
+    
+    public init(player: AVPlayer, videoGravity: AVLayerVideoGravity) {
+        self.player = player
+        self.videoGravity = videoGravity
+    }
     
     public func makeUIViewController(context: Context) -> CustomPlayerViewController {
         let controller = CustomPlayerViewController()

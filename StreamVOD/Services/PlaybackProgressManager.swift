@@ -5,7 +5,7 @@ public final class PlaybackProgressManager {
     
     private let storageKey = "saved_media_playback_progress_map"
     private var progressCache: [String: Double] = [:]
-    private let queue = DispatchQueue(label: "com.mimusinema.playbackprogress", qos: .utility)
+    private let lock = NSLock()
     
     private init() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
@@ -22,6 +22,8 @@ public final class PlaybackProgressManager {
     }
     
     public func getSavedProgress(for media: MediaItem) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
         let k = cacheKey(for: media)
         if let val = progressCache[k], val > 8.0 {
             return val
@@ -33,30 +35,37 @@ public final class PlaybackProgressManager {
         guard currentTime > 5.0 else { return }
         let k = cacheKey(for: media)
         
-        queue.async { [weak self] in
+        lock.lock()
+        // Eğer video son 15 saniyeye geldiyse ya da bittiyse sıfırla
+        if totalDuration > 30.0 && currentTime >= (totalDuration - 15.0) {
+            progressCache.removeValue(forKey: k)
+        } else {
+            progressCache[k] = currentTime
+        }
+        let snapshot = progressCache
+        lock.unlock()
+        
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            
-            // Eğer video son 15 saniyeye geldiyse ya da bittiyse sıfırla
-            if totalDuration > 30.0 && currentTime >= (totalDuration - 15.0) {
-                self.progressCache.removeValue(forKey: k)
-            } else {
-                self.progressCache[k] = currentTime
-            }
-            self.persist()
+            self.persist(snapshot)
         }
     }
     
     public func clearProgress(for media: MediaItem) {
         let k = cacheKey(for: media)
-        queue.async { [weak self] in
+        lock.lock()
+        progressCache.removeValue(forKey: k)
+        let snapshot = progressCache
+        lock.unlock()
+        
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            self.progressCache.removeValue(forKey: k)
-            self.persist()
+            self.persist(snapshot)
         }
     }
     
-    private func persist() {
-        if let data = try? JSONEncoder().encode(progressCache) {
+    private func persist(_ snapshot: [String: Double]) {
+        if let data = try? JSONEncoder().encode(snapshot) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }

@@ -32,6 +32,10 @@ public struct GlassmorphicTabBar: View {
     @Binding public var selectedTab: TabItemType
     @ObservedObject private var networkMonitor = NetworkMonitorService.shared
     
+    public init(selectedTab: Binding<TabItemType>) {
+        self._selectedTab = selectedTab
+    }
+    
     public var body: some View {
         VStack(spacing: 6) {
             // Çevrimdışı Mod Bilgilendirme Rozeti
