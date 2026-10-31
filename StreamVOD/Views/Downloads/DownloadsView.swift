@@ -183,7 +183,11 @@ public struct DownloadsView: View {
                             // Tekil İndir / Oynat Butonu
                             if task.status == .completed {
                                 Button(action: {
-                                    playingItem = task.mediaItem
+                                    var toPlay = task.mediaItem
+                                    if let resolved = downloadManager.resolvedLocalUrl(for: task.mediaItem) {
+                                        toPlay.localRelativePath = resolved.path
+                                    }
+                                    playingItem = toPlay
                                 }) {
                                     Image(systemName: "play.circle.fill")
                                         .font(.title2)
@@ -372,7 +376,11 @@ public struct DownloadsView: View {
             
             // Oynat Butonu
             Button(action: {
-                playingItem = item.mediaItem
+                var toPlay = item.mediaItem
+                if let resolved = downloadManager.resolvedLocalUrl(for: item.mediaItem) {
+                    toPlay.localRelativePath = resolved.path
+                }
+                playingItem = toPlay
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "play.fill")

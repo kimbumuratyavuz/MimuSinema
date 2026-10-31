@@ -68,8 +68,67 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         }
     }
     
-    /// Dinamik yerel dosya çözücü (Dosya var ve boyutu 1MB'dan büyük mü kontrol eder)
+    /// Dinamik yerel dosya çözücü (Dosyanın gerçek yerini bulur ve doğrular)
     public func resolvedLocalUrl(for media: MediaItem) -> URL? {
+        // 1. Doğrudan localRelativePath kontrolü (Tam yol veya göreceli yol olabilir)
+        if let rel = media.localRelativePath, !rel.isEmpty {
+            let direct = URL(fileURLWithPath: rel)
+            if FileManager.default.fileExists(atPath: direct.path) {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: direct.path),
+                   let size = attrs[.size] as? Int64, size > 1024 * 1024 {
+                    return direct
+                }
+            }
+            
+            let docAppended = documentsDirectory.appendingPathComponent(rel)
+            if FileManager.default.fileExists(atPath: docAppended.path) {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: docAppended.path),
+                   let size = attrs[.size] as? Int64, size > 1024 * 1024 {
+                    return docAppended
+                }
+            }
+            
+            let inMovies = moviesDirectory.appendingPathComponent(URL(fileURLWithPath: rel).lastPathComponent)
+            if FileManager.default.fileExists(atPath: inMovies.path) {
+                return inMovies
+            }
+            
+            if let sName = media.seriesName {
+                let inSeries = seriesFolderUrl(for: sName).appendingPathComponent(URL(fileURLWithPath: rel).lastPathComponent)
+                if FileManager.default.fileExists(atPath: inSeries.path) {
+                    return inSeries
+                }
+            }
+        }
+        
+        // 2. İndirme kuyruğundaki kayıtlı görevlerden yerel dosya yolunu ara
+        if let task = queue.first(where: {
+            $0.status == .completed && (
+                $0.mediaItem.streamUrl == media.streamUrl ||
+                $0.mediaItem.cleanTitle == media.cleanTitle ||
+                $0.mediaItem.id == media.id
+            )
+        }), let savedPath = task.localFilePath {
+            let savedUrl = URL(fileURLWithPath: savedPath)
+            if FileManager.default.fileExists(atPath: savedUrl.path) {
+                return savedUrl
+            }
+            
+            let fileName = savedUrl.lastPathComponent
+            let movieCandidate = moviesDirectory.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: movieCandidate.path) {
+                return movieCandidate
+            }
+            
+            if let sName = media.seriesName ?? task.mediaItem.seriesName {
+                let seriesCandidate = seriesFolderUrl(for: sName).appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: seriesCandidate.path) {
+                    return seriesCandidate
+                }
+            }
+        }
+        
+        // 3. Varsayılan hedef dosya yolu kontrolü
         let target = destinationUrl(for: media)
         if FileManager.default.fileExists(atPath: target.path) {
             if let attrs = try? FileManager.default.attributesOfItem(atPath: target.path),
@@ -78,22 +137,28 @@ public final class DownloadManagerService: NSObject, ObservableObject {
             }
         }
         
-        if let rel = media.localRelativePath {
-            let direct = URL(fileURLWithPath: rel)
-            if FileManager.default.fileExists(atPath: direct.path) {
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: direct.path),
-                   let size = attrs[.size] as? Int64, size > 1024 * 1024 {
-                    return direct
-                }
+        // Alternatif format kontrolü (.ts yerine .mp4 veya tersi)
+        let altExt = target.pathExtension.lowercased() == "ts" ? "mp4" : "ts"
+        let altTarget = target.deletingPathExtension().appendingPathExtension(altExt)
+        if FileManager.default.fileExists(atPath: altTarget.path) {
+            return altTarget
+        }
+        
+        // 4. Klasörlerde başlık bazlı tarama
+        let sanitized = sanitizeFileName(media.cleanTitle.isEmpty ? media.title : media.cleanTitle)
+        for ext in ["ts", "mp4", "m4v", "mov"] {
+            let mCandidate = moviesDirectory.appendingPathComponent("\(sanitized).\(ext)")
+            if FileManager.default.fileExists(atPath: mCandidate.path) {
+                return mCandidate
             }
-            let docAppended = documentsDirectory.appendingPathComponent(rel)
-            if FileManager.default.fileExists(atPath: docAppended.path) {
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: docAppended.path),
-                   let size = attrs[.size] as? Int64, size > 1024 * 1024 {
-                    return docAppended
+            if let sName = media.seriesName {
+                let sCandidate = seriesFolderUrl(for: sName).appendingPathComponent("\(sanitized).\(ext)")
+                if FileManager.default.fileExists(atPath: sCandidate.path) {
+                    return sCandidate
                 }
             }
         }
+        
         return nil
     }
     

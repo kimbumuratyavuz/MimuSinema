@@ -34,6 +34,7 @@ public struct CustomPlayerView: View {
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
     @State private var playbackErrorMessage: String? = nil
+    @State private var itemObserver: NSKeyValueObservation? = nil
     
     // Süre & Akıllı Arama Durumları
     @State private var currentTime: Double = 0
@@ -242,6 +243,8 @@ public struct CustomPlayerView: View {
             }
             player?.pause()
             player = nil
+            itemObserver?.invalidate()
+            itemObserver = nil
             controlsTimer?.invalidate()
         }
     }
@@ -411,13 +414,14 @@ public struct CustomPlayerView: View {
     // MARK: - Oynatıcı Yükleme & Ses Optimizasyonu
     private func loadPlayer() {
         player?.pause()
+        itemObserver?.invalidate()
+        itemObserver = nil
         playbackErrorMessage = nil
         
         let item: AVPlayerItem
         
-        if let localPlaybackUrl = DownloadManagerService.shared.playbackUrl(for: currentMedia) {
-            let asset = AVURLAsset(url: localPlaybackUrl)
-            item = AVPlayerItem(asset: asset)
+        if let localFileUrl = DownloadManagerService.shared.resolvedLocalUrl(for: currentMedia) {
+            item = AVPlayerItem(url: localFileUrl)
         } else {
             var headers: [String: String] = [:]
             if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
@@ -442,6 +446,20 @@ public struct CustomPlayerView: View {
         p.isMuted = false
         
         self.player = p
+        
+        // Öğe durumunu izle (Hata olursa ekranda açıkça göster, hazırsa başlat)
+        itemObserver = item.observe(\.status, options: [.new, .initial]) { obsItem, _ in
+            DispatchQueue.main.async {
+                if obsItem.status == .failed {
+                    self.playbackErrorMessage = obsItem.error?.localizedDescription ?? "Video oynatılamadı."
+                } else if obsItem.status == .readyToPlay {
+                    self.playbackErrorMessage = nil
+                    if self.isPlaying {
+                        self.player?.play()
+                    }
+                }
+            }
+        }
         
         // Varsa Ses Grubundaki İlk Aktif Ses Kanalını Seç
         Task {
