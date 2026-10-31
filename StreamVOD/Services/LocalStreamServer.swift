@@ -7,7 +7,7 @@ public final class LocalStreamServer: ObservableObject {
     public static let shared = LocalStreamServer()
     
     private var listener: NWListener?
-    private let queue = DispatchQueue(label: "com.mimusinema.localserver", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.mimusinema.localserver", qos: .userInitiated, attributes: .concurrent)
     public private(set) var port: UInt16 = 18080
     public private(set) var isRunning: Bool = false
     
@@ -97,9 +97,15 @@ public final class LocalStreamServer: ObservableObject {
             return m3u8Url
         }
         
-        // Eğer m3u8 zaten varsa ve geçerliyse tekrar oluşturma
+        let fileName = tsUrl.lastPathComponent
+        let encodedFileName = fileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fileName
+        
+        // Eğer m3u8 zaten varsa, geçerliyse ve URI boşluk içermiyorsa tekrar oluşturma
         if let existing = try? String(contentsOf: m3u8Url, encoding: .utf8),
-           existing.contains("#EXT-X-BYTERANGE:") && existing.contains("#EXT-X-ENDLIST") {
+           existing.contains("#EXT-X-BYTERANGE:"),
+           existing.contains("#EXT-X-ENDLIST"),
+           !existing.contains(" .ts"),
+           (!fileName.contains(" ") || existing.contains(encodedFileName)) {
             return m3u8Url
         }
         
@@ -110,14 +116,13 @@ public final class LocalStreamServer: ObservableObject {
         
         var content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
         var offset: Int64 = 0
-        let fileName = tsUrl.lastPathComponent
         
         while offset < totalSize {
             let remaining = totalSize - offset
             let currentLen = min(segSize, remaining)
             content += "#EXT-X-BYTERANGE:\(currentLen)@\(offset)\n"
             content += String(format: "#EXTINF:%.3f,\n", segDuration)
-            content += "\(fileName)\n"
+            content += "\(encodedFileName)\n"
             offset += currentLen
         }
         
@@ -340,7 +345,25 @@ public final class LocalStreamServer: ObservableObject {
             return
         }
         
-        // Önce HTTP Başlığını gönder
+        // HLS Range segmentleri genellikle ~1.8 MB boyutundadır. 4MB altındaki istekleri tek parça birleşik göndererek sıfır gecikme sağla:
+        if totalBytesToSend <= 4 * 1024 * 1024 {
+            do {
+                try handle.seek(toOffset: startOffset)
+                let chunkData = handle.readData(ofLength: Int(totalBytesToSend))
+                try? handle.close()
+                
+                var fullResponse = headerData
+                fullResponse.append(chunkData)
+                connection.send(content: fullResponse, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in }))
+                return
+            } catch {
+                try? handle.close()
+                send500(connection: connection)
+                return
+            }
+        }
+        
+        // 4MB'tan büyük dosyalar için akıcı parçalı (chunked) gönderim
         connection.send(content: headerData, isComplete: false, completion: .contentProcessed({ [weak self] error in
             guard let self = self, error == nil else {
                 try? handle.close()
@@ -368,7 +391,7 @@ public final class LocalStreamServer: ObservableObject {
             return
         }
         
-        let chunkSize = min(256 * 1024, Int(remainingBytes))
+        let chunkSize = min(512 * 1024, Int(remainingBytes))
         do {
             try handle.seek(toOffset: currentOffset)
             let chunk = handle.readData(ofLength: chunkSize)

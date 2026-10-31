@@ -173,42 +173,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     /// TS dosyası için anında standart byte-range M3U8 index dosyası oluşturur / doğrular
     @discardableResult
     public func ensureM3U8Exists(for tsUrl: URL) -> URL {
-        let m3u8Url = tsUrl.deletingPathExtension().appendingPathExtension("m3u8")
-        
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tsUrl.path),
-              let totalSize = attrs[.size] as? Int64, totalSize > 0 else {
-            return m3u8Url
-        }
-        
-        // Eğer m3u8 zaten varsa ve içinde BYTERANGE varsa tekrar yazmaya gerek yok
-        if let existing = try? String(contentsOf: m3u8Url, encoding: .utf8),
-           existing.contains("#EXT-X-BYTERANGE:") && existing.contains("#EXT-X-ENDLIST") {
-            return m3u8Url
-        }
-        
-        // MPEG-TS paket boyutu: 188 bayt. Her sanal segment yaklaşık 1.88 MB (~5 saniye video)
-        let packetSize: Int64 = 188
-        let packetsPerSeg: Int64 = 10_000
-        let segSize: Int64 = packetSize * packetsPerSeg // 1,880,000 bayt
-        let segDuration: Double = 5.0
-        
-        var content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
-        var offset: Int64 = 0
-        let fileName = tsUrl.lastPathComponent
-        
-        while offset < totalSize {
-            let remaining = totalSize - offset
-            let currentLen = min(segSize, remaining)
-            content += "#EXT-X-BYTERANGE:\(currentLen)@\(offset)\n"
-            content += String(format: "#EXTINF:%.3f,\n", segDuration)
-            content += "\(fileName)\n"
-            offset += currentLen
-        }
-        
-        content += "#EXT-X-ENDLIST\n"
-        try? content.write(to: m3u8Url, atomically: true, encoding: .utf8)
-        print("[DownloadManager] M3U8 index dosyası başarıyla üretildi: \(m3u8Url.lastPathComponent)")
-        return m3u8Url
+        return LocalStreamServer.generateM3U8Synchronously(for: tsUrl)
     }
     
     /// Oynatıcı için yerel akış URL'si (TS dosyalarını yerel HTTP HLS sunucusu, MP4 dosyalarını doğrudan dosya URL'si olarak sunar)
@@ -216,6 +181,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
         guard let localUrl = resolvedLocalUrl(for: media) else { return nil }
         let ext = localUrl.pathExtension.lowercased()
         if ext == "ts" {
+            LocalStreamServer.shared.start()
             let m3u8Url = ensureM3U8Exists(for: localUrl)
             return LocalStreamServer.shared.url(for: m3u8Url)
         } else {
@@ -616,11 +582,12 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 
                 // HLS için kusursuz ve anında oynatılabilir standart .m3u8 index dosyasını oluştur
                 let m3u8Destination = destination.deletingPathExtension().appendingPathExtension("m3u8")
+                let encodedFileName = destination.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? destination.lastPathComponent
                 var m3u8Content = "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:15\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
                 for entry in byteRangeEntries.sorted(by: { $0.offset < $1.offset }) {
                     m3u8Content += "#EXT-X-BYTERANGE:\(entry.length)@\(entry.offset)\n"
                     m3u8Content += String(format: "#EXTINF:%.3f,\n", entry.duration)
-                    m3u8Content += "\(destination.lastPathComponent)\n"
+                    m3u8Content += "\(encodedFileName)\n"
                 }
                 m3u8Content += "#EXT-X-ENDLIST\n"
                 try? m3u8Content.write(to: m3u8Destination, atomically: true, encoding: .utf8)
@@ -714,9 +681,14 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     item.localFilePath = fullPath.path
                     movies.append(item)
                 } else {
-                    let media = MediaItem(title: rawTitle, streamUrl: fullPath, isSeries: false, localRelativePath: "Movies/\(file)")
+                    let media = MediaItem(
+                        title: rawTitle,
+                        streamUrl: fullPath,
+                        isSeriesOverride: false,
+                        localRelativePath: "Movies/\(file)"
+                    )
                     var task = DownloadTaskItem(mediaItem: media)
-                    task.status = .completed
+                    task.status = DownloadStatus.completed
                     task.progress = 1.0
                     task.localFilePath = fullPath.path
                     movies.append(task)
@@ -751,9 +723,15 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                             item.localFilePath = fullPath.path
                             episodes.append(item)
                         } else {
-                            let media = MediaItem(title: rawTitle, streamUrl: fullPath, isSeries: true, seriesName: sFolder, localRelativePath: "Series/\(sFolder)/\(eFile)")
+                            let media = MediaItem(
+                                title: rawTitle,
+                                groupTitle: sFolder,
+                                streamUrl: fullPath,
+                                isSeriesOverride: true,
+                                localRelativePath: "Series/\(sFolder)/\(eFile)"
+                            )
                             var task = DownloadTaskItem(mediaItem: media)
-                            task.status = .completed
+                            task.status = DownloadStatus.completed
                             task.progress = 1.0
                             task.localFilePath = fullPath.path
                             episodes.append(task)
