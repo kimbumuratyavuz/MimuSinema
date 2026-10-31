@@ -6,7 +6,6 @@ public struct DownloadsView: View {
     
     // Oynatıcı Durumu
     @State private var playingItem: MediaItem? = nil
-    @State private var playingLocalUrl: URL? = nil
     
     // Silme Onay Durumları
     @State private var showDeleteFileAlert: Bool = false
@@ -40,17 +39,6 @@ public struct DownloadsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $playingItem) { item in
                 CustomPlayerView(mediaList: [item], initialIndex: 0)
-            }
-            .fullScreenCover(isPresented: Binding(
-                get: { playingLocalUrl != nil },
-                set: { if !$0 { playingLocalUrl = nil } }
-            )) {
-                if let url = playingLocalUrl {
-                    QuickLookController(url: url) {
-                        playingLocalUrl = nil
-                    }
-                    .ignoresSafeArea()
-                }
             }
             // 1. Tekil Dosya / Bölüm Silme Onay Uyarısı
             .alert("Dosyayı Sil", isPresented: $showDeleteFileAlert) {
@@ -195,11 +183,7 @@ public struct DownloadsView: View {
                             // Tekil İndir / Oynat Butonu
                             if task.status == .completed {
                                 Button(action: {
-                                    if let resolved = downloadManager.resolvedLocalUrl(for: task.mediaItem) {
-                                        playingLocalUrl = resolved
-                                    } else {
-                                        playingItem = task.mediaItem
-                                    }
+                                    playingItem = task.mediaItem
                                 }) {
                                     Image(systemName: "play.circle.fill")
                                         .font(.title2)
@@ -388,11 +372,7 @@ public struct DownloadsView: View {
             
             // Oynat Butonu
             Button(action: {
-                if let resolved = downloadManager.resolvedLocalUrl(for: item.mediaItem) {
-                    playingLocalUrl = resolved
-                } else {
-                    playingItem = item.mediaItem
-                }
+                playingItem = item.mediaItem
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "play.fill")

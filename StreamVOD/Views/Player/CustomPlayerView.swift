@@ -30,7 +30,6 @@ public struct CustomPlayerView: View {
     
     // Oynatıcı Durumları
     @State private var player: AVPlayer?
-    @State private var localFileUrl: URL? = nil
     @State private var isPlaying: Bool = true
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
@@ -74,12 +73,7 @@ public struct CustomPlayerView: View {
             Color.black.ignoresSafeArea()
             
             // 1. VİDEO YANSITICI
-            if let localUrl = localFileUrl {
-                QuickLookController(url: localUrl) {
-                    dismiss()
-                }
-                .ignoresSafeArea()
-            } else if let player = player {
+            if let player = player {
                 AVPlayerCustomRepresentable(
                     player: player,
                     videoGravity: aspectModes[aspectModeIndex].videoGravity
@@ -112,8 +106,7 @@ public struct CustomPlayerView: View {
             }
             
             // 2. JEST KATMANI
-            if localFileUrl == nil {
-                GeometryReader { geo in
+            GeometryReader { geo in
                     HStack(spacing: 0) {
                         // SOL ALAN (-5 sn Sarma & Sol Basılı Tutma)
                         Color.clear
@@ -157,7 +150,6 @@ public struct CustomPlayerView: View {
                     }
                 }
                 .ignoresSafeArea()
-            }
             
             // 3. JEST BİLDİRİMLERİ (±5 SN)
             HStack {
@@ -214,7 +206,7 @@ public struct CustomPlayerView: View {
             }
             
             // 4. KONTROL KATMANI
-            if localFileUrl == nil && showControls {
+            if showControls {
                 VStack(spacing: 0) {
                     topBarView
                     
@@ -426,24 +418,24 @@ public struct CustomPlayerView: View {
         itemObserver = nil
         playbackErrorMessage = nil
         
-        // 1. İndirilmiş yerel dosya varsa doğrudan Apple QuickLook motoruyla aç (Dosyalar uygulamasının oynattığı gibi)
-        if let localUrl = DownloadManagerService.shared.resolvedLocalUrl(for: currentMedia) {
-            self.localFileUrl = localUrl
-            return
-        }
-        
-        self.localFileUrl = nil
         let item: AVPlayerItem
         
-        var headers: [String: String] = [:]
-        if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
-        if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
-        
-        let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        item = AVPlayerItem(asset: asset)
-        
-        item.preferredForwardBufferDuration = 15.0
-        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+        // 1. İndirilmiş dosya varsa LocalStreamServer üzerinden HLS veya MP4 olarak oynat
+        if let playbackUrl = DownloadManagerService.shared.playbackUrl(for: currentMedia) {
+            print("[CustomPlayerView] İndirilen yerel akış oynatılıyor: \(playbackUrl)")
+            item = AVPlayerItem(url: playbackUrl)
+        } else {
+            print("[CustomPlayerView] Uzaktan canlı akış oynatılıyor: \(currentMedia.streamUrl)")
+            var headers: [String: String] = [:]
+            if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
+            if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
+            
+            let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+            item = AVPlayerItem(asset: asset)
+            
+            item.preferredForwardBufferDuration = 15.0
+            item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+        }
         
         setupPlayerWithItem(item)
     }

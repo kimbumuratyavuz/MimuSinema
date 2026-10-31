@@ -64,23 +64,26 @@ public final class LocalStreamServer: ObservableObject {
         }
     }
     
-    /// Yerel dosya URL'sini localhost HTTP stream URL'sine çevirir
+    /// Yerel dosya URL'sini localhost HTTP stream URL'sine çevirir (iOS /var ve /private/var sembolik bağlarına karşı dayanıklı)
     public func url(for fileUrl: URL) -> URL {
-        let docPath = documentsDirectory.standardizedFileURL.path
-        let filePath = fileUrl.standardizedFileURL.path
-        
-        var relativePath = filePath
-        if filePath.hasPrefix(docPath) {
-            relativePath = String(filePath.dropFirst(docPath.count))
-            if relativePath.hasPrefix("/") {
-                relativePath = String(relativePath.dropFirst())
-            }
-        } else {
-            relativePath = fileUrl.lastPathComponent
-        }
-        
+        let relativePath = relativePathFromDocuments(for: fileUrl)
         let encodedPath = relativePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? relativePath
         return URL(string: "http://127.0.0.1:\(self.port)/\(encodedPath)")!
+    }
+    
+    private func relativePathFromDocuments(for fileUrl: URL) -> String {
+        let comps = fileUrl.standardizedFileURL.pathComponents
+        if let docIndex = comps.firstIndex(of: "Documents"), docIndex + 1 < comps.count {
+            let sub = comps.suffix(from: docIndex + 1)
+            return sub.joined(separator: "/")
+        }
+        
+        let pathStr = fileUrl.path
+        if let range = pathStr.range(of: "/Documents/") {
+            return String(pathStr[range.upperBound...])
+        }
+        
+        return fileUrl.lastPathComponent
     }
     
     // MARK: - İstek İşleme
@@ -129,9 +132,23 @@ public final class LocalStreamServer: ObservableObject {
     }
     
     private func servePath(_ relPath: String, rangeHeader: String?, connection: NWConnection, isHeadOnly: Bool) {
-        let fileUrl = documentsDirectory.appendingPathComponent(relPath)
+        var fileUrl = documentsDirectory.appendingPathComponent(relPath)
         
-        // 1. Dosya .m3u8 istenmiş ama henüz yoksa fakat .ts dosyası varsa: Anında dinamik M3U8 üret!
+        // 1. Dosya doğrudan bulunamazsa Movies veya Series altında ara
+        if !FileManager.default.fileExists(atPath: fileUrl.path) {
+            let inMovies = documentsDirectory.appendingPathComponent("Movies").appendingPathComponent(relPath)
+            if FileManager.default.fileExists(atPath: inMovies.path) {
+                fileUrl = inMovies
+            } else {
+                let lastComp = URL(fileURLWithPath: relPath).lastPathComponent
+                let inMoviesByName = documentsDirectory.appendingPathComponent("Movies").appendingPathComponent(lastComp)
+                if FileManager.default.fileExists(atPath: inMoviesByName.path) {
+                    fileUrl = inMoviesByName
+                }
+            }
+        }
+        
+        // 2. Dosya .m3u8 istenmiş ama henüz yoksa fakat .ts dosyası varsa: Anında dinamik M3U8 üret!
         if relPath.lowercased().hasSuffix(".m3u8") && !FileManager.default.fileExists(atPath: fileUrl.path) {
             let tsUrl = fileUrl.deletingPathExtension().appendingPathExtension("ts")
             if FileManager.default.fileExists(atPath: tsUrl.path) {
@@ -153,7 +170,7 @@ public final class LocalStreamServer: ObservableObject {
             }
         }
         
-        // 2. Normal Dosya Kontrolü
+        // 3. Normal Dosya Kontrolü
         guard FileManager.default.fileExists(atPath: fileUrl.path) else {
             send404(connection: connection)
             return
@@ -168,7 +185,7 @@ public final class LocalStreamServer: ObservableObject {
         let ext = fileUrl.pathExtension.lowercased()
         let mime = mimeType(for: ext)
         
-        // Range Talebi (AVPlayer parça parça talep eder)
+        // Range Talebi (AVPlayer parça parça talep eder - RAM şişmesini önlemek için 2MB parçalarla yanıt verilir)
         if let range = rangeHeader, range.hasPrefix("bytes=") {
             let spec = range.replacingOccurrences(of: "bytes=", with: "").trimmingCharacters(in: .whitespaces)
             let byteParts = spec.components(separatedBy: "-")
@@ -183,13 +200,16 @@ public final class LocalStreamServer: ObservableObject {
                 end = max(start, min(endVal, totalSize - 1))
             }
             
-            let length = end - start + 1
+            // RAM patlamasını önle: En fazla 2 MB parça oku
+            let maxChunk: Int64 = 2 * 1024 * 1024
+            let length = min(end - start + 1, maxChunk)
+            let actualEnd = start + length - 1
             
             if isHeadOnly {
                 let header = """
                 HTTP/1.1 206 Partial Content\r\n\
                 Content-Type: \(mime)\r\n\
-                Content-Range: bytes \(start)-\(end)/\(totalSize)\r\n\
+                Content-Range: bytes \(start)-\(actualEnd)/\(totalSize)\r\n\
                 Content-Length: \(length)\r\n\
                 Accept-Ranges: bytes\r\n\
                 Access-Control-Allow-Origin: *\r\n\
@@ -214,7 +234,7 @@ public final class LocalStreamServer: ObservableObject {
                 let header = """
                 HTTP/1.1 206 Partial Content\r\n\
                 Content-Type: \(mime)\r\n\
-                Content-Range: bytes \(start)-\(end)/\(totalSize)\r\n\
+                Content-Range: bytes \(start)-\(actualEnd)/\(totalSize)\r\n\
                 Content-Length: \(slice.count)\r\n\
                 Accept-Ranges: bytes\r\n\
                 Access-Control-Allow-Origin: *\r\n\
