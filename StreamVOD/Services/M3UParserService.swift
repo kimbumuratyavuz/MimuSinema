@@ -104,13 +104,34 @@ public final class M3UParserService {
         return nil
     }
     
+    /// Dizi adındaki sezon eklerini (örn. " - 1. Sezon", " - Sezon 2", " S1", " 1.S") temizleyerek ana dizi adını elde eder
+    public static func cleanSeriesName(_ rawName: String) -> String {
+        var name = rawName
+        let patterns = [
+            "(?i)\\s*-\\s*\\d+\\s*\\.?\\s*(?:sezon|season|seazon|s)\\b.*",
+            "(?i)\\s*-\\s*(?:sezon|season|seazon)\\s*\\d+\\b.*",
+            "(?i)\\s*-\\s*S\\s*\\d+\\b.*",
+            "(?i)\\s+\\d+\\s*(?:-\\s*\\d+)?\\s*\\.?\\s*(?:sezon|season|seazon)(?:lar)?\\b.*",
+            "(?i)\\s+(?:sezon|season|seazon)\\s+\\d+\\b.*"
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(location: 0, length: name.utf16.count)
+                name = regex.stringByReplacingMatches(in: name, options: [], range: range, withTemplate: "")
+            }
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? rawName : trimmed
+    }
+
     /// Dizi listesini dizi adına göre gruplar
     public func groupSeries(items: [MediaItem]) -> [SeriesGroup] {
         var groups: [String: [MediaItem]] = [:]
         var logos: [String: String?] = [:]
         
         for item in items {
-            let sName = item.seriesName ?? item.groupTitle
+            let rawName = item.seriesName ?? item.groupTitle
+            let sName = Self.cleanSeriesName(rawName)
             if groups[sName] == nil {
                 groups[sName] = []
                 logos[sName] = item.logoUrl

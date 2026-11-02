@@ -76,23 +76,58 @@ public struct MediaItem: Identifiable, Codable, Hashable {
             self.seriesName = groupTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             self.episodeTitle = cleaned
             
-            // Sezon tespiti: "1.S", "2.S", "1. Sezon", "S01", "Season 1" vb.
-            let seasonPattern = "((\\d+)\\s*\\.?\\s*(S|Sezon|Season))|(S(\\d+))"
-            if let regex = try? NSRegularExpression(pattern: seasonPattern, options: .caseInsensitive),
-               let match = regex.firstMatch(in: title, options: [], range: NSRange(location: 0, length: title.utf16.count)),
-               let range = Range(match.range, in: title) {
-                let seasonStr = String(title[range])
-                // Sadece sayıyı alıp "X. Sezon" formatına dönüştürelim
-                let numbers = seasonStr.filter { "0123456789".contains($0) }
-                self.seasonName = numbers.isEmpty ? "1. Sezon" : "\(numbers). Sezon"
-            } else {
-                self.seasonName = "1. Sezon"
-            }
+            // Sezon tespiti: "1.S", "2.S", "Sezon 1", "1. Sezon", "S01", "S1", "Seazon" vb.
+            self.seasonName = MediaItem.extractSeasonName(title: title, groupTitle: groupTitle)
         } else {
             self.seriesName = nil
             self.episodeTitle = nil
             self.seasonName = ""
         }
+    }
+    
+    /// Dizi adı ve bölüm başlıklarından sezon bilgisini ayrıştırıp standartlaştırır ("1. Sezon", "2. Sezon" vb.)
+    public static func extractSeasonName(title: String, groupTitle: String) -> String {
+        // Kontrol sırası: önce bölüm başlığı (title), ardından grup başlığı (groupTitle)
+        let candidates = [title, groupTitle]
+        
+        // 1. Sayı ve sezon belirteçleri içeren regex desenleri:
+        // Pattern 1: Sayı önce ("1.S", "2. S", "1. Sezon", "1 Sezon", "1.Season", "2.Seazon", "1S")
+        // Pattern 2: Sezon kelimesi önce ("Sezon 1", "Season 2", "Seazon 1", "Sezon1")
+        // Pattern 3: S harfi ve sayı ("S1", "S01", "S 1", "s2")
+        let regexPatterns = [
+            "(?i)(?:^|[^\\w])(\\d+)\\s*\\.?\\s*(?:sezon|season|seazon|s)\\b",
+            "(?i)\\b(?:sezon|season|seazon)\\s*(\\d+)\\b",
+            "(?i)(?:^|[\\s\\.\\-_\\[\\(])S\\s*(\\d+)\\b"
+        ]
+        
+        for candidate in candidates {
+            for pattern in regexPatterns {
+                if let regex = try? NSRegularExpression(pattern: pattern),
+                   let match = regex.firstMatch(in: candidate, options: [], range: NSRange(location: 0, length: candidate.utf16.count)),
+                   match.numberOfRanges > 1 {
+                    let range = match.range(at: 1)
+                    if range.location != NSNotFound, let r = Range(range, in: candidate) {
+                        let numStr = String(candidate[r])
+                        if let num = Int(numStr), num > 0 {
+                            return "\(num). Sezon"
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 2. Sayı belirtilmemiş fakat tek başına "Sezon", "Season", "Seazon" geçen durumlar -> Varsayılan 1. Sezon
+        let genericPattern = "(?i)\\b(?:sezon|season|seazon)\\b"
+        if let regex = try? NSRegularExpression(pattern: genericPattern) {
+            for candidate in candidates {
+                let range = NSRange(location: 0, length: candidate.utf16.count)
+                if regex.firstMatch(in: candidate, options: [], range: range) != nil {
+                    return "1. Sezon"
+                }
+            }
+        }
+        
+        return "1. Sezon"
     }
 }
 
