@@ -18,6 +18,9 @@ public struct DownloadsView: View {
     @State private var showDeleteSeriesAlert: Bool = false
     @State private var seriesNameToDelete: String? = nil
     
+    // İndirilen Dizi Detay Sayfası için Seçilen Dizi
+    @State private var selectedDownloadedSeries: DownloadedSeriesSheetItem? = nil
+    
     public var body: some View {
         NavigationView {
             ZStack(alignment: .top) {
@@ -101,6 +104,24 @@ public struct DownloadsView: View {
                 } else {
                     Text("Diziyi silmek istediğinize emin misiniz?")
                 }
+            }
+            .sheet(item: $selectedDownloadedSeries) { sheetItem in
+                DownloadedSeriesDetailView(
+                    seriesName: sheetItem.seriesName,
+                    onPlay: { item in
+                        selectedDownloadedSeries = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            playingItem = item.mediaItem
+                        }
+                    },
+                    onDelete: { item in
+                        downloadManager.deleteDownloadedFile(item: item)
+                    },
+                    onDeleteAll: {
+                        downloadManager.deleteEntireSeries(seriesName: sheetItem.seriesName)
+                        selectedDownloadedSeries = nil
+                    }
+                )
             }
         }
     }
@@ -322,13 +343,13 @@ public struct DownloadsView: View {
                     Divider().background(Color.gray.opacity(0.3))
                 }
                 
-                // DİZİLER KLASÖRÜ
+                // DİZİLER (AFİŞ KARTLARI)
                 if !seriesGrouped.isEmpty {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack {
-                            Image(systemName: "folder.fill")
-                                .foregroundColor(.yellow)
-                            Text("Dizi Klasörü (Documents/Series)")
+                            Image(systemName: "tv.fill")
+                                .foregroundColor(.red)
+                            Text("İndirilen Diziler")
                                 .font(.headline)
                                 .foregroundColor(.white)
                             Spacer()
@@ -338,49 +359,63 @@ public struct DownloadsView: View {
                         }
                         .padding(.horizontal)
                         
-                        ForEach(Array(seriesGrouped.keys.sorted()), id: \.self) { seriesName in
-                            DisclosureGroup {
-                                ForEach(seriesGrouped[seriesName] ?? []) { item in
-                                    downloadedItemRow(item: item)
-                                        .padding(.leading, 8)
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "folder")
-                                        .foregroundColor(.orange)
-                                    Text(seriesName)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text("\((seriesGrouped[seriesName] ?? []).count) Bölüm")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                    
-                                    // TÜM DİZİYİ VE KLASÖRÜNÜ SİL BUTONU
-                                    Button(action: {
-                                        seriesNameToDelete = seriesName
-                                        showDeleteSeriesAlert = true
-                                    }) {
-                                        HStack(spacing: 2) {
-                                            Image(systemName: "trash.fill")
-                                                .font(.system(size: 11))
-                                            Text("Diziyi Sil")
-                                                .font(.caption2)
+                        let sortedSeriesNames = Array(seriesGrouped.keys.sorted())
+                        let columns = [
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12)
+                        ]
+                        
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(sortedSeriesNames, id: \.self) { seriesName in
+                                let episodes = seriesGrouped[seriesName] ?? []
+                                let posterUrl = episodes.first(where: { !($0.mediaItem.logoUrl ?? "").isEmpty })?.mediaItem.logoUrl
+                                
+                                Button(action: {
+                                    selectedDownloadedSeries = DownloadedSeriesSheetItem(seriesName: seriesName)
+                                }) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ZStack(alignment: .topTrailing) {
+                                            CachedAsyncImage(urlString: posterUrl) { img in
+                                                img
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Rectangle()
+                                                    .fill(Color.gray.opacity(0.18))
+                                                    .overlay(
+                                                        Image(systemName: "tv")
+                                                            .font(.title2)
+                                                            .foregroundColor(.gray.opacity(0.5))
+                                                    )
+                                            }
+                                            .frame(height: 150)
+                                            .clipped()
+                                            .cornerRadius(8)
+                                            
+                                            // Bölüm Sayısı Rozeti
+                                            Text("\(episodes.count) Bölüm")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 3)
+                                                .background(Color.red.opacity(0.85))
+                                                .cornerRadius(4)
+                                                .padding(5)
                                         }
-                                        .foregroundColor(.red)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(Color.red.opacity(0.15))
-                                        .cornerRadius(4)
+                                        
+                                        Text(seriesName)
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.white)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
                                     }
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .padding(.horizontal)
-                            .accentColor(.white)
                         }
+                        .padding(.horizontal)
                     }
                 }
             }
@@ -473,6 +508,212 @@ public struct DownloadsView: View {
         case .completed: return .green
         case .failed: return .red
         case .paused: return .gray
+        }
+    }
+}
+
+// MARK: - İndirilen Dizi Detay Sayfası / Modalı
+public struct DownloadedSeriesSheetItem: Identifiable {
+    public var id: String { seriesName }
+    public let seriesName: String
+    
+    public init(seriesName: String) {
+        self.seriesName = seriesName
+    }
+}
+
+public struct DownloadedSeriesDetailView: View {
+    public let seriesName: String
+    public var onPlay: (DownloadTaskItem) -> Void
+    public var onDelete: (DownloadTaskItem) -> Void
+    public var onDeleteAll: () -> Void
+    
+    @ObservedObject private var downloadManager = DownloadManagerService.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var showDeleteAllAlert = false
+    
+    public init(
+        seriesName: String,
+        onPlay: @escaping (DownloadTaskItem) -> Void,
+        onDelete: @escaping (DownloadTaskItem) -> Void,
+        onDeleteAll: @escaping () -> Void
+    ) {
+        self.seriesName = seriesName
+        self.onPlay = onPlay
+        self.onDelete = onDelete
+        self.onDeleteAll = onDeleteAll
+    }
+    
+    private var seriesEpisodes: [DownloadTaskItem] {
+        downloadManager.downloadedSeries[seriesName] ?? []
+    }
+    
+    private var headerPosterUrl: String? {
+        seriesEpisodes.first(where: { !($0.mediaItem.logoUrl ?? "").isEmpty })?.mediaItem.logoUrl
+    }
+    
+    public var body: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea()
+                
+                if seriesEpisodes.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 48))
+                            .foregroundColor(.gray)
+                        Text("Bu diziye ait indirilmiş bölüm kalmadı.")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                    }
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // Üst Başlık Kartı
+                            HStack(spacing: 14) {
+                                CachedAsyncImage(urlString: headerPosterUrl) { img in
+                                    img
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.2))
+                                        .overlay(Image(systemName: "tv").foregroundColor(.gray))
+                                }
+                                .frame(width: 80, height: 110)
+                                .cornerRadius(8)
+                                .clipped()
+                                
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(seriesName)
+                                        .font(.title3)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .lineLimit(2)
+                                    
+                                    Text("\(seriesEpisodes.count) Bölüm İndirildi")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                    
+                                    Button(action: {
+                                        showDeleteAllAlert = true
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "trash.fill")
+                                                .font(.caption2)
+                                            Text("Tüm Diziyi Sil")
+                                                .font(.caption)
+                                                .fontWeight(.semibold)
+                                        }
+                                        .foregroundColor(.red)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.red.opacity(0.15))
+                                        .cornerRadius(6)
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, 12)
+                            
+                            Divider().background(Color.gray.opacity(0.3))
+                            
+                            // Bölümler Listesi
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("İndirilen Bölümler")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal)
+                                
+                                ForEach(seriesEpisodes) { item in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.mediaItem.cleanTitle)
+                                                .font(.subheadline)
+                                                .fontWeight(.medium)
+                                                .foregroundColor(.white)
+                                                .lineLimit(2)
+                                            
+                                            HStack(spacing: 8) {
+                                                if let path = item.localFilePath {
+                                                    Text(URL(fileURLWithPath: path).lastPathComponent)
+                                                        .font(.caption2)
+                                                        .foregroundColor(.gray)
+                                                        .lineLimit(1)
+                                                }
+                                                if item.totalBytes > 0 {
+                                                    Text(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))
+                                                        .font(.caption2)
+                                                        .foregroundColor(.gray.opacity(0.8))
+                                                }
+                                            }
+                                        }
+                                        
+                                        Spacer()
+                                        
+                                        // Oynat
+                                        Button(action: {
+                                            onPlay(item)
+                                        }) {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "play.fill")
+                                                Text("İzle")
+                                            }
+                                            .font(.caption)
+                                            .fontWeight(.bold)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(Color.green)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(6)
+                                        }
+                                        .buttonStyle(.plain)
+                                        
+                                        // Sil
+                                        Button(action: {
+                                            onDelete(item)
+                                        }) {
+                                            Image(systemName: "trash")
+                                                .font(.subheadline)
+                                                .foregroundColor(.red)
+                                                .padding(6)
+                                                .background(Circle().fill(Color.red.opacity(0.15)))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
+                                    .background(Color.white.opacity(0.04))
+                                    .cornerRadius(8)
+                                    .padding(.horizontal)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 24)
+                    }
+                }
+            }
+            .navigationTitle(seriesName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Kapat") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .alert("Tüm Diziyi Sil", isPresented: $showDeleteAllAlert) {
+                Button("Tümünü Sil", role: .destructive) {
+                    onDeleteAll()
+                    dismiss()
+                }
+                Button("Vazgeç", role: .cancel) {}
+            } message: {
+                Text("'\(seriesName)' dizisine ait tüm indirilmiş bölümler silinecektir. Emin misiniz?")
+            }
         }
     }
 }

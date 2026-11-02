@@ -46,17 +46,20 @@ public final class M3UParserService {
             } else if line.hasPrefix("#EXTVLCOPT:http-user-agent=") {
                 currentUserAgent = line.replacingOccurrences(of: "#EXTVLCOPT:http-user-agent=", with: "").trimmingCharacters(in: .whitespaces)
             } else if !line.hasPrefix("#") {
-                if isInItem, let url = URL(string: line) {
-                    let item = MediaItem(
-                        title: currentTitle,
-                        logoUrl: currentLogo,
-                        groupTitle: currentGroup,
-                        streamUrl: url,
-                        httpReferrer: currentReferrer,
-                        httpUserAgent: currentUserAgent,
-                        isSeriesOverride: isSeriesOverride
-                    )
-                    items.append(item)
+                if isInItem {
+                    let streamUrl = URL(string: line) ?? URL(string: line.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+                    if let url = streamUrl {
+                        let item = MediaItem(
+                            title: currentTitle,
+                            logoUrl: currentLogo,
+                            groupTitle: currentGroup,
+                            streamUrl: url,
+                            httpReferrer: currentReferrer,
+                            httpUserAgent: currentUserAgent,
+                            isSeriesOverride: isSeriesOverride
+                        )
+                        items.append(item)
+                    }
                 }
                 isInItem = false
             }

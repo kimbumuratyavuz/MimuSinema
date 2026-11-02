@@ -536,8 +536,10 @@ public struct CustomPlayerView: View {
         } else {
             print("[CustomPlayerView] Uzaktan canlı akış oynatılıyor: \(currentMedia.streamUrl)")
             var headers: [String: String] = [:]
-            if let ref = currentMedia.httpReferrer, !ref.isEmpty { headers["Referer"] = ref }
-            if let ua = currentMedia.httpUserAgent, !ua.isEmpty { headers["User-Agent"] = ua }
+            let ref = (currentMedia.httpReferrer?.isEmpty == false) ? currentMedia.httpReferrer! : "https://twitter.com/"
+            let ua = (currentMedia.httpUserAgent?.isEmpty == false) ? currentMedia.httpUserAgent! : "googleusercontent"
+            headers["Referer"] = ref
+            headers["User-Agent"] = ua
             
             let asset = AVURLAsset(url: currentMedia.streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
             item = AVPlayerItem(asset: asset)
@@ -646,6 +648,11 @@ public struct CustomPlayerView: View {
             if let err = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
                 self.playbackErrorMessage = err.localizedDescription
             }
+        }
+        
+        // Oynatmayı doğrudan tetikle (AVPlayer arka planda hazır olduğunda anında başlar)
+        if isPlaying {
+            p.play()
         }
     }
     
