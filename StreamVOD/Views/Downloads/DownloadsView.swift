@@ -545,7 +545,7 @@ public struct DownloadedSeriesDetailView: View {
     }
     
     private var seriesEpisodes: [DownloadTaskItem] {
-        downloadManager.downloadedSeries[seriesName] ?? []
+        downloadManager.downloadedSeriesGrouped[seriesName] ?? []
     }
     
     private var headerPosterUrl: String? {
