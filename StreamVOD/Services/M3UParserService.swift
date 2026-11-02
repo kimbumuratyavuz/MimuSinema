@@ -103,8 +103,10 @@ public final class M3UParserService {
     /// Dizi adındaki sezon eklerini önceden derlenmiş statik regex'ler ile anında temizler
     public static func cleanSeriesName(_ rawName: String) -> String {
         var name = rawName
-        let range = NSRange(location: 0, length: name.utf16.count)
         for regex in cleanSeriesRegexes {
+            let count = name.utf16.count
+            if count == 0 { break }
+            let range = NSRange(location: 0, length: count)
             name = regex.stringByReplacingMatches(in: name, options: [], range: range, withTemplate: "")
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

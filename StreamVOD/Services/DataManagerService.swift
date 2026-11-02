@@ -251,19 +251,31 @@ public final class DataManagerService: ObservableObject {
         let mFile = Self.moviesCacheFile
         let sFile = Self.seriesCacheFile
         
-        if let data = try? Data(contentsOf: mFile),
-           let cached = try? JSONDecoder().decode([MediaItem].self, from: data),
-           !cached.isEmpty {
-            self.allMoviesPool = cached
-            self.loadMoreMovies()
-        }
-        
-        if let sData = try? Data(contentsOf: sFile),
-           let cachedEps = try? JSONDecoder().decode([MediaItem].self, from: sData),
-           !cachedEps.isEmpty {
-            let grouped = M3UParserService.shared.groupSeries(items: cachedEps)
-            self.allSeriesPool = grouped
-            self.loadMoreSeries()
+        Task.detached(priority: .userInitiated) {
+            var loadedMovies: [MediaItem] = []
+            if let data = try? Data(contentsOf: mFile),
+               let cached = try? JSONDecoder().decode([MediaItem].self, from: data),
+               !cached.isEmpty {
+                loadedMovies = cached
+            }
+            
+            var loadedSeries: [SeriesGroup] = []
+            if let sData = try? Data(contentsOf: sFile),
+               let cachedEps = try? JSONDecoder().decode([MediaItem].self, from: sData),
+               !cachedEps.isEmpty {
+                loadedSeries = M3UParserService.shared.groupSeries(items: cachedEps)
+            }
+            
+            await MainActor.run {
+                if !loadedMovies.isEmpty && self.allMoviesPool.isEmpty {
+                    self.allMoviesPool = loadedMovies
+                    self.loadMoreMovies()
+                }
+                if !loadedSeries.isEmpty && self.allSeriesPool.isEmpty {
+                    self.allSeriesPool = loadedSeries
+                    self.loadMoreSeries()
+                }
+            }
         }
     }
 }

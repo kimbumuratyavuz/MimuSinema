@@ -8,7 +8,6 @@ public struct SplashScreenView: View {
     @State private var progress: CGFloat = 0.0
     @State private var moviePosterUrl: String? = nil
     @State private var seriesPosterUrl: String? = nil
-    @State private var timerCancellable: AnyCancellable? = nil
     
     public init(isFinished: Binding<Bool>) {
         self._isFinished = isFinished
@@ -54,10 +53,10 @@ public struct SplashScreenView: View {
             }
             .ignoresSafeArea()
             
-            // Sinematik Karartma Katmanı (Afişlerin arkada hafif ve asil görünmesi için)
+            // Sinematik Karartma Katmanı
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.82),
+                    Color.black.opacity(0.85),
                     Color.black.opacity(0.70),
                     Color.black.opacity(0.92)
                 ],
@@ -100,12 +99,10 @@ public struct SplashScreenView: View {
                 // Kırmızı İlerleme Çubuğu (Progress Bar)
                 GeometryReader { barGeo in
                     ZStack(alignment: .leading) {
-                        // Arka Plan Çizgisi
                         Capsule()
                             .fill(Color.white.opacity(0.2))
                             .frame(height: 6)
                         
-                        // İlerleyen Kırmızı Çizgi
                         Capsule()
                             .fill(
                                 LinearGradient(
@@ -125,50 +122,39 @@ public struct SplashScreenView: View {
         }
         .onAppear {
             pickRandomPosters()
-            startSplashScreenTimer()
+            startSplashScreen()
+            dataManager.fetchAllData()
         }
         .onReceive(dataManager.$allMoviesPool) { movies in
-            if moviePosterUrl == nil, let random = movies.compactMap({ $0.logoUrl }).randomElement() {
+            if moviePosterUrl == nil, let random = movies.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
                 moviePosterUrl = random
             }
         }
         .onReceive(dataManager.$allSeriesPool) { series in
-            if seriesPosterUrl == nil, let random = series.compactMap({ $0.logoUrl }).randomElement() {
+            if seriesPosterUrl == nil, let random = series.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
                 seriesPosterUrl = random
             }
         }
     }
     
     private func pickRandomPosters() {
-        if let randomMovie = dataManager.allMoviesPool.compactMap({ $0.logoUrl }).randomElement() {
+        if let randomMovie = dataManager.allMoviesPool.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
             self.moviePosterUrl = randomMovie
         }
-        if let randomSeries = dataManager.allSeriesPool.compactMap({ $0.logoUrl }).randomElement() {
+        if let randomSeries = dataManager.allSeriesPool.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
             self.seriesPosterUrl = randomSeries
         }
     }
     
-    private func startSplashScreenTimer() {
-        let totalDuration: Double = 6.0
-        let interval: Double = 0.05
-        let totalSteps = totalDuration / interval
-        var currentStep: Double = 0
+    private func startSplashScreen() {
+        withAnimation(.linear(duration: 6.0)) {
+            progress = 1.0
+        }
         
-        timerCancellable = Timer.publish(every: interval, on: .main, in: .common)
-            .autoconnect()
-            .sink { _ in
-                currentStep += 1
-                withAnimation(.linear(duration: interval)) {
-                    progress = min(1.0, CGFloat(currentStep / totalSteps))
-                }
-                
-                if currentStep >= totalSteps {
-                    timerCancellable?.cancel()
-                    timerCancellable = nil
-                    withAnimation(.easeInOut(duration: 0.6)) {
-                        isFinished = true
-                    }
-                }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                isFinished = true
             }
+        }
     }
 }
