@@ -5,9 +5,13 @@ import AVFoundation
 // MARK: - Global Orientation Manager
 public final class OrientationManager {
     public static func forceOrientation(_ orientation: UIInterfaceOrientationMask) {
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+        AppDelegate.orientationLock = orientation
+        
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for windowScene in scenes {
             if #available(iOS 16.0, *) {
                 windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
+                windowScene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             } else {
                 let val: Int
                 switch orientation {
@@ -329,9 +333,7 @@ public struct CustomPlayerView: View {
             if totalDuration > 0 {
                 PlaybackProgressManager.shared.saveProgress(for: currentMedia, currentTime: currentTime, totalDuration: totalDuration)
             }
-            if isLandscapeMode {
-                OrientationManager.forceOrientation(.portrait)
-            }
+            OrientationManager.forceOrientation(.portrait)
             cleanupPlayer()
         }
     }
@@ -373,6 +375,9 @@ public struct CustomPlayerView: View {
     private var topBarView: some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: {
+                if isLandscapeMode {
+                    OrientationManager.forceOrientation(.portrait)
+                }
                 dismiss()
             }) {
                 Image(systemName: "chevron.left")
@@ -513,7 +518,7 @@ public struct CustomPlayerView: View {
     private func toggleOrientation() {
         isLandscapeMode.toggle()
         if isLandscapeMode {
-            OrientationManager.forceOrientation(.landscapeRight)
+            OrientationManager.forceOrientation(.landscape)
         } else {
             OrientationManager.forceOrientation(.portrait)
         }
