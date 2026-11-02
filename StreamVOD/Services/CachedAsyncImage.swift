@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 public final class ImageCacheService {
     public static let shared = ImageCacheService()

@@ -610,11 +610,11 @@ public struct CustomPlayerView: View {
             }
         }
         
-        timeObserverToken = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0, preferredTimescale: 600), queue: .main) { [weak p] time in
-            guard let p = p else { return }
-            if !isDraggingSlider && !isSeeking {
+        timeObserverToken = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0, preferredTimescale: 600), queue: .main) { time in
+            guard let curPlayer = self.player else { return }
+            if !self.isDraggingSlider && !self.isSeeking {
                 self.currentTime = time.seconds
-                if let dur = p.currentItem?.duration.seconds, !dur.isNaN && !dur.isInfinite && dur > 0 {
+                if let dur = curPlayer.currentItem?.duration.seconds, !dur.isNaN && !dur.isInfinite && dur > 0 {
                     self.totalDuration = dur
                 }
                 if self.totalDuration > 0 && !self.showResumePrompt {
@@ -631,11 +631,10 @@ public struct CustomPlayerView: View {
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak p] _ in
-            guard p != nil else { return }
+        ) { _ in
             PlaybackProgressManager.shared.clearProgress(for: self.currentMedia)
-            if hasNextEpisode {
-                playNextEpisode()
+            if self.hasNextEpisode {
+                self.playNextEpisode()
             }
         }
         
