@@ -638,15 +638,18 @@ public struct DownloadedSeriesDetailView: View {
                                             
                                             HStack(spacing: 8) {
                                                 if let path = item.localFilePath {
-                                                    Text(URL(fileURLWithPath: path).lastPathComponent)
+                                                    let url = URL(fileURLWithPath: path)
+                                                    Text(url.lastPathComponent)
                                                         .font(.caption2)
                                                         .foregroundColor(.gray)
                                                         .lineLimit(1)
-                                                }
-                                                if item.totalBytes > 0 {
-                                                    Text(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))
-                                                        .font(.caption2)
-                                                        .foregroundColor(.gray.opacity(0.8))
+                                                    
+                                                    if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                                                       let size = attrs[.size] as? Int64, size > 0 {
+                                                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                                                            .font(.caption2)
+                                                            .foregroundColor(.gray.opacity(0.8))
+                                                    }
                                                 }
                                             }
                                         }
