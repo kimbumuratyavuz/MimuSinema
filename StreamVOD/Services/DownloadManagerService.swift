@@ -560,7 +560,10 @@ public final class DownloadManagerService: NSObject, ObservableObject {
     
     // MARK: - Yüksek Hızlı, Kesintisiz Pipeline HLS İndirici
     private func downloadM3U8Safely(media: MediaItem, destination: URL, taskIndex: Int) {
-        self.currentDownloadTask = Task {
+        let session = self.downloadSession
+        let workers = self.concurrentWorkers
+        
+        self.currentDownloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let ref = (media.httpReferrer?.isEmpty == false) ? media.httpReferrer! : "https://twitter.com/"
                 let ua = (media.httpUserAgent?.isEmpty == false) ? media.httpUserAgent! : "googleusercontent"
@@ -569,7 +572,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 req.setValue(ref, forHTTPHeaderField: "Referer")
                 req.setValue(ua, forHTTPHeaderField: "User-Agent")
                 
-                let (data, response) = try await self.downloadSession.data(for: req)
+                let (data, response) = try await session.data(for: req)
                 guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200,
                       let content = String(data: data, encoding: .utf8) else {
                     throw NSError(domain: "MimuSinema", code: -1, userInfo: [NSLocalizedDescriptionKey: "Playlist indirilemedi (HTTP Hata)."])
@@ -609,7 +612,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     var subReq = URLRequest(url: master)
                     subReq.setValue(ref, forHTTPHeaderField: "Referer")
                     subReq.setValue(ua, forHTTPHeaderField: "User-Agent")
-                    let (subData, subRes) = try await self.downloadSession.data(for: subReq)
+                    let (subData, subRes) = try await session.data(for: subReq)
                     if let sRes = subRes as? HTTPURLResponse, sRes.statusCode == 200,
                        let subContent = String(data: subData, encoding: .utf8) {
                         let subLines = subContent.components(separatedBy: .newlines)
@@ -661,20 +664,20 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 fileHandle.seekToEndOfFile()
                 
                 let totalSegments = segmentUrls.count
-                let maxWorkers = self.concurrentWorkers
                 var nextSegmentToFetch = completedSegments
                 var nextSegmentToWrite = completedSegments
                 var buffer: [Int: Data] = [:]
                 
                 try await withThrowingTaskGroup(of: (Int, Data?).self) { group in
-                    // İlk 12 eşzamanlı kanalı başlat
-                    let initialBatch = min(maxWorkers, totalSegments - nextSegmentToFetch)
+                    // İlk eşzamanlı kanalları başlat
+                    let initialBatch = min(workers, totalSegments - nextSegmentToFetch)
                     for _ in 0..<initialBatch {
                         let segIdx = nextSegmentToFetch
                         nextSegmentToFetch += 1
                         let segUrl = segmentUrls[segIdx]
                         group.addTask {
-                            return await self.fetchSingleSegmentWithRetry(
+                            return await Self.fetchSingleSegmentWithRetry(
+                                session: session,
                                 url: segUrl,
                                 referrer: ref,
                                 userAgent: ua,
@@ -685,7 +688,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                     
                     // Her parça indiğinde yaz ve yeni kanal başlat
                     for try await (idx, segDataOpt) in group {
-                        if Task.isCancelled || self.isPausedCurrent || self.isStoppedCurrent {
+                        if Task.isCancelled {
                             group.cancelAll()
                             break
                         }
@@ -711,6 +714,7 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                         let progress = Double(completedSegments) / Double(totalSegments)
                         let percent = Int(progress * 100)
                         await MainActor.run {
+                            guard let self = self else { return }
                             if taskIndex < self.queue.count {
                                 self.queue[taskIndex].progress = progress
                                 self.queue[taskIndex].speedText = "% \(percent) (\(completedSegments)/\(totalSegments) parça - Yüksek Hız)"
@@ -718,12 +722,13 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                         }
                         
                         // Daha indirilecek parça varsa anında yeni kanal aç (12 kanal daima tam dolu kalır)
-                        if nextSegmentToFetch < totalSegments && !Task.isCancelled && !self.isPausedCurrent && !self.isStoppedCurrent {
+                        if nextSegmentToFetch < totalSegments && !Task.isCancelled {
                             let nextIdx = nextSegmentToFetch
                             nextSegmentToFetch += 1
                             let nextUrl = segmentUrls[nextIdx]
                             group.addTask {
-                                return await self.fetchSingleSegmentWithRetry(
+                                return await Self.fetchSingleSegmentWithRetry(
+                                    session: session,
                                     url: nextUrl,
                                     referrer: ref,
                                     userAgent: ua,
@@ -736,14 +741,20 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 
                 try? fileHandle.close()
                 
+                let (isPaused, isStopped) = await MainActor.run { () -> (Bool, Bool) in
+                    guard let self = self else { return (false, false) }
+                    return (self.isPausedCurrent, self.isStoppedCurrent)
+                }
+                
                 // Duraklatıldıysa metadata kaydet ve dur
-                if self.isPausedCurrent {
+                if isPaused {
                     let metaEntries = byteRangeEntries.map { ByteRangeMeta(duration: $0.duration, length: $0.length, offset: $0.offset) }
                     let meta = DownloadProgressMeta(completedSegments: completedSegments, byteRangeEntries: metaEntries)
                     if let mData = try? JSONEncoder().encode(meta) {
                         try? mData.write(to: metaUrl)
                     }
                     await MainActor.run {
+                        guard let self = self else { return }
                         if taskIndex < self.queue.count {
                             self.queue[taskIndex].status = .paused
                             self.queue[taskIndex].speedText = "Duraklatıldı (\(completedSegments)/\(totalSegments) parça)"
@@ -756,10 +767,11 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 }
                 
                 // Durdurulduysa dosyaları temizle ve dur
-                if self.isStoppedCurrent {
+                if isStopped {
                     try? FileManager.default.removeItem(at: tempDestination)
                     try? FileManager.default.removeItem(at: metaUrl)
                     await MainActor.run {
+                        guard let self = self else { return }
                         if taskIndex < self.queue.count {
                             self.queue[taskIndex].status = .stopped
                             self.queue[taskIndex].progress = 0.0
@@ -805,29 +817,39 @@ public final class DownloadManagerService: NSObject, ObservableObject {
                 try? m3u8Content.write(to: m3u8Destination, atomically: true, encoding: .utf8)
                 
                 await MainActor.run {
+                    guard let self = self else { return }
                     self.markCompleted(taskIndex: taskIndex, localUrl: destination)
                     self.processNextInQueue()
                 }
                 
             } catch {
                 await MainActor.run {
-                    self.markFailed(taskIndex: taskIndex, error: error.localizedDescription)
-                    self.processNextInQueue()
+                    guard let self = self else { return }
+                    if !self.isPausedCurrent && !self.isStoppedCurrent && !Task.isCancelled {
+                        self.markFailed(taskIndex: taskIndex, error: error.localizedDescription)
+                        self.processNextInQueue()
+                    }
                 }
             }
         }
     }
     
-    private func fetchSingleSegmentWithRetry(url: URL, referrer: String?, userAgent: String?, index: Int) async -> (Int, Data?) {
+    private static func fetchSingleSegmentWithRetry(
+        session: URLSession,
+        url: URL,
+        referrer: String?,
+        userAgent: String?,
+        index: Int
+    ) async -> (Int, Data?) {
         for attempt in 1...3 {
-            if Task.isCancelled || self.isPausedCurrent || self.isStoppedCurrent { return (index, nil) }
+            if Task.isCancelled { return (index, nil) }
             do {
                 var sReq = URLRequest(url: url)
                 sReq.timeoutInterval = 20
                 if let ref = referrer { sReq.setValue(ref, forHTTPHeaderField: "Referer") }
                 if let ua = userAgent { sReq.setValue(ua, forHTTPHeaderField: "User-Agent") }
                 
-                let (data, response) = try await downloadSession.data(for: sReq)
+                let (data, response) = try await session.data(for: sReq)
                 if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200, data.count > 128 {
                     return (index, data)
                 }

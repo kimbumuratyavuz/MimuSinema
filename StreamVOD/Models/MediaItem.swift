@@ -1,13 +1,13 @@
 import Foundation
 
-public enum AudioLanguageType: String, Codable, CaseIterable {
+public enum AudioLanguageType: String, Codable, CaseIterable, Sendable {
     case all = "Tümü"
     case dubbing = "Dublaj"
     case subtitle = "Altyazı"
     case original = "Orijinal"
 }
 
-public struct MediaItem: Identifiable, Codable, Hashable {
+public struct MediaItem: Identifiable, Codable, Hashable, Sendable {
     public let id: String
     public var title: String
     public var cleanTitle: String

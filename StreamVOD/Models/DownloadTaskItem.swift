@@ -1,5 +1,27 @@
 import Foundation
 
+public struct ByteRangeMeta: Codable, Sendable {
+    public let duration: Double
+    public let length: Int
+    public let offset: Int
+    
+    public init(duration: Double, length: Int, offset: Int) {
+        self.duration = duration
+        self.length = length
+        self.offset = offset
+    }
+}
+
+public struct DownloadProgressMeta: Codable, Sendable {
+    public let completedSegments: Int
+    public let byteRangeEntries: [ByteRangeMeta]
+    
+    public init(completedSegments: Int, byteRangeEntries: [ByteRangeMeta]) {
+        self.completedSegments = completedSegments
+        self.byteRangeEntries = byteRangeEntries
+    }
+}
+
 public enum DownloadStatus: String, Codable {
     case queued = "Kuyrukta"
     case downloading = "İndiriliyor"
