@@ -6,8 +6,7 @@ public struct SplashScreenView: View {
     @Binding public var isFinished: Bool
     
     @State private var progress: CGFloat = 0.0
-    @State private var moviePosterUrl: String? = nil
-    @State private var seriesPosterUrl: String? = nil
+    @State private var selectedPosterUrl: String? = nil
     
     public init(isFinished: Binding<Bool>) {
         self._isFinished = isFinished
@@ -17,47 +16,29 @@ public struct SplashScreenView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // 1. ARKA PLAN: Film ve Dizi M3U'larından Rastgele Kapaklar
-            GeometryReader { geo in
-                HStack(spacing: 0) {
-                    // Sol Yarı: Rastgele Film Kapağı
-                    ZStack {
-                        if let movieUrl = moviePosterUrl {
-                            CachedAsyncImage(urlString: movieUrl) { img in
-                                img.resizable().aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Color(red: 0.1, green: 0.1, blue: 0.12)
-                            }
-                        } else {
-                            Color(red: 0.1, green: 0.1, blue: 0.12)
-                        }
+            // 1. ARKA PLAN: Her açılışta rastgele tek bir film veya dizi afişi
+            ZStack {
+                if let posterUrl = selectedPosterUrl {
+                    CachedAsyncImage(urlString: posterUrl) { img in
+                        img
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Color(red: 0.08, green: 0.08, blue: 0.1)
                     }
-                    .frame(width: geo.size.width / 2, height: geo.size.height)
-                    .clipped()
-                    
-                    // Sağ Yarı: Rastgele Dizi Kapağı
-                    ZStack {
-                        if let seriesUrl = seriesPosterUrl {
-                            CachedAsyncImage(urlString: seriesUrl) { img in
-                                img.resizable().aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Color(red: 0.08, green: 0.08, blue: 0.1)
-                            }
-                        } else {
-                            Color(red: 0.08, green: 0.08, blue: 0.1)
-                        }
-                    }
-                    .frame(width: geo.size.width / 2, height: geo.size.height)
-                    .clipped()
+                } else {
+                    Color(red: 0.08, green: 0.08, blue: 0.1)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
             .ignoresSafeArea()
             
-            // Sinematik Karartma Katmanı
+            // Sinematik Karartma Katmanı (Afişin üzerinde logonun ve progress barın net görünmesi için)
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.85),
-                    Color.black.opacity(0.70),
+                    Color.black.opacity(0.82),
+                    Color.black.opacity(0.45),
                     Color.black.opacity(0.92)
                 ],
                 startPoint: .top,
@@ -76,7 +57,7 @@ public struct SplashScreenView: View {
                             .font(.system(size: 32, weight: .black, design: .rounded))
                             .foregroundColor(.red)
                     }
-                    .shadow(color: .red.opacity(0.4), radius: 10, x: 0, y: 0)
+                    .shadow(color: .red.opacity(0.5), radius: 12, x: 0, y: 0)
                     .padding(.leading, 24)
                     .padding(.top, 48)
                     
@@ -121,28 +102,32 @@ public struct SplashScreenView: View {
             }
         }
         .onAppear {
-            pickRandomPosters()
+            pickRandomPoster()
             startSplashScreen()
             dataManager.fetchAllData()
         }
         .onReceive(dataManager.$allMoviesPool) { movies in
-            if moviePosterUrl == nil, let random = movies.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
-                moviePosterUrl = random
+            if selectedPosterUrl == nil, let random = movies.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
+                selectedPosterUrl = random
             }
         }
         .onReceive(dataManager.$allSeriesPool) { series in
-            if seriesPosterUrl == nil, let random = series.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
-                seriesPosterUrl = random
+            if selectedPosterUrl == nil, let random = series.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
+                selectedPosterUrl = random
             }
         }
     }
     
-    private func pickRandomPosters() {
-        if let randomMovie = dataManager.allMoviesPool.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
-            self.moviePosterUrl = randomMovie
-        }
-        if let randomSeries = dataManager.allSeriesPool.prefix(100).compactMap({ $0.logoUrl }).randomElement() {
-            self.seriesPosterUrl = randomSeries
+    /// Her açılışta film veya dizi havuzundan rastgele tek bir afiş belirler
+    private func pickRandomPoster() {
+        var candidates: [String] = []
+        let moviePosters = dataManager.allMoviesPool.prefix(100).compactMap { $0.logoUrl }
+        let seriesPosters = dataManager.allSeriesPool.prefix(100).compactMap { $0.logoUrl }
+        candidates.append(contentsOf: moviePosters)
+        candidates.append(contentsOf: seriesPosters)
+        
+        if let random = candidates.randomElement() {
+            self.selectedPosterUrl = random
         }
     }
     
