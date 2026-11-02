@@ -27,12 +27,21 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct MimuSinemaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var isSplashFinished: Bool = false
 
     var body: some Scene {
         WindowGroup {
-            MainTabView()
-                .preferredColorScheme(.dark)
-                .edgesIgnoringSafeArea(.all)
+            ZStack {
+                if isSplashFinished {
+                    MainTabView()
+                        .transition(.opacity)
+                } else {
+                    SplashScreenView(isFinished: $isSplashFinished)
+                        .transition(.opacity)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .edgesIgnoringSafeArea(.all)
         }
     }
 }

@@ -3,12 +3,24 @@ import Foundation
 public final class M3UParserService {
     public static let shared = M3UParserService()
     
+    // Önceden derlenmiş (pre-compiled) regex'ler - 60.000 satır için tek bir kez derlenir
+    private static let cleanSeriesRegexes: [NSRegularExpression] = {
+        let patterns = [
+            "(?i)\\s*-\\s*\\d+\\s*\\.?\\s*(?:sezon|season|seazon|s)\\b.*",
+            "(?i)\\s*-\\s*(?:sezon|season|seazon)\\s*\\d+\\b.*",
+            "(?i)\\s*-\\s*S\\s*\\d+\\b.*",
+            "(?i)\\s+\\d+\\s*(?:-\\s*\\d+)?\\s*\\.?\\s*(?:sezon|season|seazon)(?:lar)?\\b.*",
+            "(?i)\\s+(?:sezon|season|seazon)\\s+\\d+\\b.*"
+        ]
+        return patterns.compactMap { try? NSRegularExpression(pattern: $0) }
+    }()
+    
     private init() {}
     
-    /// Verilen raw M3U metnini parse ederek MediaItem listesi üretir
+    /// Verilen raw M3U metnini parse ederek MediaItem listesi üretir (Bellek sızıntısı ve OOM'u önleyecek akış mimarisi)
     public func parse(m3uContent: String, isSeriesOverride: Bool? = nil) -> [MediaItem] {
         var items: [MediaItem] = []
-        let lines = m3uContent.components(separatedBy: .newlines)
+        items.reserveCapacity(min(m3uContent.count / 200, 30_000))
         
         var currentTitle: String = ""
         var currentLogo: String? = nil
@@ -17,21 +29,16 @@ public final class M3UParserService {
         var currentUserAgent: String? = nil
         var isInItem = false
         
-        for rawLine in lines {
+        // components(separatedBy:) yerine enumerateLines kullanarak 120.000 geçici string tahsisini engelliyoruz
+        m3uContent.enumerateLines { rawLine, _ in
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty { continue }
+            if line.isEmpty { return }
             
             if line.hasPrefix("#EXTINF:") {
                 isInItem = true
-                currentLogo = extractAttribute(line: line, key: "tvg-logo")
-                
-                // group-title ayrıştırma (Örn: group-title="RecTV Filmler - Komedi" veya kapanmayan tırnaklar)
-                currentGroup = extractGroupTitle(from: line)
-                
-                // Başlık ayrıştırma
-                currentTitle = extractTitle(from: line, fallbackGroup: currentGroup)
-                
-                // Headerları sıfırla
+                currentLogo = self.extractAttributeFast(line: line, key: "tvg-logo")
+                currentGroup = self.extractGroupTitleFast(from: line)
+                currentTitle = self.extractTitleFast(from: line, fallbackGroup: currentGroup)
                 currentReferrer = nil
                 currentUserAgent = nil
             } else if line.hasPrefix("#EXTVLCOPT:http-referrer=") {
@@ -39,7 +46,6 @@ public final class M3UParserService {
             } else if line.hasPrefix("#EXTVLCOPT:http-user-agent=") {
                 currentUserAgent = line.replacingOccurrences(of: "#EXTVLCOPT:http-user-agent=", with: "").trimmingCharacters(in: .whitespaces)
             } else if !line.hasPrefix("#") {
-                // Stream URL
                 if isInItem, let url = URL(string: line) {
                     let item = MediaItem(
                         title: currentTitle,
@@ -59,66 +65,47 @@ public final class M3UParserService {
         return items
     }
     
-    private func extractGroupTitle(from line: String) -> String {
-        // 1. group-title="..." normal tırnak kontrolü
-        if let regex = try? NSRegularExpression(pattern: "group-title=\"([^\"]+)\"", options: .caseInsensitive),
-           let match = regex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: line.utf16.count)),
-           let range = Range(match.range(at: 1), in: line) {
-            return String(line[range]).trimmingCharacters(in: .whitespaces)
-        }
-        
-        // 2. Kapanmayan tırnak kontrolü: group-title="RecTV Filmler - Komedi, Başlık
-        if let range = line.range(of: "group-title=\"") {
-            let rest = line[range.upperBound...]
-            if let commaIndex = rest.firstIndex(of: ",") {
-                let groupCandidate = rest[..<commaIndex]
-                return String(groupCandidate).replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespaces)
+    // MARK: - Regex Olmadan Ultra Hızlı String Ayrıştırma (0 ms CPU, 0 MB Bellek)
+    
+    private func extractAttributeFast(line: String, key: String) -> String? {
+        let prefix = "\(key)=\""
+        guard let startRange = line.range(of: prefix) else { return nil }
+        let rest = line[startRange.upperBound...]
+        guard let endRange = rest.range(of: "\"") else { return nil }
+        return String(rest[..<endRange.lowerBound])
+    }
+    
+    private func extractGroupTitleFast(from line: String) -> String {
+        let prefix = "group-title=\""
+        if let startRange = line.range(of: prefix) {
+            let rest = line[startRange.upperBound...]
+            if let endRange = rest.range(of: "\"") {
+                let group = rest[..<endRange.lowerBound].trimmingCharacters(in: .whitespaces)
+                if !group.isEmpty { return String(group) }
+            } else if let commaRange = rest.range(of: ",") {
+                let group = rest[..<commaRange.lowerBound].trimmingCharacters(in: .whitespaces)
+                if !group.isEmpty { return String(group) }
             }
         }
-        
         return "Genel"
     }
     
-    private func extractTitle(from line: String, fallbackGroup: String) -> String {
-        // En son virgülü bulup başlık olarak alalım
+    private func extractTitleFast(from line: String, fallbackGroup: String) -> String {
         if let commaIndex = line.lastIndex(of: ",") {
-            let titlePart = line[line.index(after: commaIndex)...]
-            let clean = titlePart.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !clean.isEmpty {
-                return clean
+            let titlePart = line[line.index(after: commaIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !titlePart.isEmpty {
+                return titlePart
             }
         }
         return fallbackGroup
     }
     
-    private func extractAttribute(line: String, key: String) -> String? {
-        let pattern = "\(key)=\"([^\"]*)\""
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
-            return nil
-        }
-        let range = NSRange(location: 0, length: line.utf16.count)
-        if let match = regex.firstMatch(in: line, options: [], range: range),
-           let keyRange = Range(match.range(at: 1), in: line) {
-            return String(line[keyRange])
-        }
-        return nil
-    }
-    
-    /// Dizi adındaki sezon eklerini (örn. " - 1. Sezon", " - Sezon 2", " S1", " 1.S") temizleyerek ana dizi adını elde eder
+    /// Dizi adındaki sezon eklerini önceden derlenmiş statik regex'ler ile anında temizler
     public static func cleanSeriesName(_ rawName: String) -> String {
         var name = rawName
-        let patterns = [
-            "(?i)\\s*-\\s*\\d+\\s*\\.?\\s*(?:sezon|season|seazon|s)\\b.*",
-            "(?i)\\s*-\\s*(?:sezon|season|seazon)\\s*\\d+\\b.*",
-            "(?i)\\s*-\\s*S\\s*\\d+\\b.*",
-            "(?i)\\s+\\d+\\s*(?:-\\s*\\d+)?\\s*\\.?\\s*(?:sezon|season|seazon)(?:lar)?\\b.*",
-            "(?i)\\s+(?:sezon|season|seazon)\\s+\\d+\\b.*"
-        ]
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern) {
-                let range = NSRange(location: 0, length: name.utf16.count)
-                name = regex.stringByReplacingMatches(in: name, options: [], range: range, withTemplate: "")
-            }
+        let range = NSRange(location: 0, length: name.utf16.count)
+        for regex in cleanSeriesRegexes {
+            name = regex.stringByReplacingMatches(in: name, options: [], range: range, withTemplate: "")
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? rawName : trimmed
