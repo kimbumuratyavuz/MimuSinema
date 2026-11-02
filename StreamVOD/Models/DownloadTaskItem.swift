@@ -5,7 +5,8 @@ public enum DownloadStatus: String, Codable {
     case downloading = "İndiriliyor"
     case completed = "Tamamlandı"
     case failed = "Başarısız"
-    case paused = "Durduruldu"
+    case paused = "Duraklatıldı"
+    case stopped = "Durduruldu"
 }
 
 public struct DownloadTaskItem: Identifiable, Codable {

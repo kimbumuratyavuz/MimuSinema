@@ -131,7 +131,7 @@ public struct DownloadsView: View {
     private var queueSectionView: some View {
         VStack(spacing: 0) {
             // Toplu İşlem Barı
-            HStack {
+            HStack(spacing: 8) {
                 Button(action: {
                     let hasSelected = downloadManager.queue.contains(where: { $0.isSelected })
                     downloadManager.selectAll(!hasSelected)
@@ -147,23 +147,58 @@ public struct DownloadsView: View {
                 
                 Spacer()
                 
-                // Seçilenleri İndir Butonu
-                Button(action: {
-                    downloadManager.startSelectedDownloads()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down.circle.fill")
-                        Text(downloadManager.isDownloading ? "İndiriliyor..." : "Seçilenleri İndir")
-                            .font(.caption)
-                            .fontWeight(.bold)
+                if downloadManager.isDownloading {
+                    // Tümünü Duraklat
+                    Button(action: {
+                        downloadManager.pauseAllDownloads()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "pause.fill")
+                            Text("Duraklat")
+                        }
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(downloadManager.isDownloading ? Color.orange : Color.red)
-                    .foregroundColor(.white)
-                    .cornerRadius(6)
+                    
+                    // Tümünü Durdur
+                    Button(action: {
+                        downloadManager.stopAllDownloads()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "stop.fill")
+                            Text("Durdur")
+                        }
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.red)
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                    }
+                } else {
+                    // Seçilenleri İndir / Devam Et
+                    Button(action: {
+                        downloadManager.startSelectedDownloads()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle.fill")
+                            Text("Seçilenleri İndir")
+                        }
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.red)
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                    }
                 }
-                .disabled(downloadManager.isDownloading)
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
@@ -228,7 +263,7 @@ public struct DownloadsView: View {
                             
                             Spacer()
                             
-                            // Tekil İndir / Oynat Butonu
+                            // İşlem Butonları (Oynat, İndir, Duraklat, Durdur)
                             if task.status == .completed {
                                 Button(action: {
                                     playingItem = task.mediaItem
@@ -238,7 +273,52 @@ public struct DownloadsView: View {
                                         .foregroundColor(.green)
                                 }
                                 .buttonStyle(.plain)
-                            } else if task.status != .downloading {
+                            } else if task.status == .downloading {
+                                HStack(spacing: 8) {
+                                    // Duraklat
+                                    Button(action: {
+                                        downloadManager.pauseDownload(id: task.id)
+                                    }) {
+                                        Image(systemName: "pause.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.orange)
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    // Durdur
+                                    Button(action: {
+                                        downloadManager.stopDownload(id: task.id)
+                                    }) {
+                                        Image(systemName: "stop.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } else if task.status == .paused {
+                                HStack(spacing: 8) {
+                                    // Devam Et (Resume)
+                                    Button(action: {
+                                        downloadManager.resumeDownload(id: task.id)
+                                    }) {
+                                        Image(systemName: "play.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.green)
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    // Durdur
+                                    Button(action: {
+                                        downloadManager.stopDownload(id: task.id)
+                                    }) {
+                                        Image(systemName: "stop.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } else {
+                                // Başlat / İndir
                                 Button(action: {
                                     downloadManager.downloadSingle(id: task.id)
                                 }) {
@@ -507,7 +587,8 @@ public struct DownloadsView: View {
         case .downloading: return .orange
         case .completed: return .green
         case .failed: return .red
-        case .paused: return .gray
+        case .paused: return .blue
+        case .stopped: return .gray
         }
     }
 }
