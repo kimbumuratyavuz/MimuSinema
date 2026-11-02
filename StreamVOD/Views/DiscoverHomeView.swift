@@ -112,15 +112,44 @@ public struct DiscoverHomeView: View {
                                                     .padding(5)
                                                     .buttonStyle(.plain)
                                                     
-                                                    // Sağ Alt Bölüm Sayısı
+                                                    // Sağ Üst: Dublaj (TR) ve Altyazı (CC) Rozetleri
+                                                    VStack {
+                                                        HStack(spacing: 3) {
+                                                            Spacer()
+                                                            if group.hasDubbing {
+                                                                Text("TR")
+                                                                    .font(.system(size: 9, weight: .bold))
+                                                                    .foregroundColor(.white)
+                                                                    .padding(.horizontal, 4)
+                                                                    .padding(.vertical, 2)
+                                                                    .background(Color.green)
+                                                                    .cornerRadius(4)
+                                                            }
+                                                            if group.hasSubtitle {
+                                                                Text("CC")
+                                                                    .font(.system(size: 9, weight: .bold))
+                                                                    .foregroundColor(.white)
+                                                                    .padding(.horizontal, 4)
+                                                                    .padding(.vertical, 2)
+                                                                    .background(Color.blue)
+                                                                    .cornerRadius(4)
+                                                            }
+                                                        }
+                                                        .padding(5)
+                                                        Spacer()
+                                                    }
+                                                    
+                                                    // Sağ Alt: X Sezon X Bölüm Rozeti
                                                     VStack {
                                                         Spacer()
                                                         HStack {
                                                             Spacer()
-                                                            Text("\(group.episodes.count) Bölüm")
-                                                                .font(.system(size: 9, weight: .bold))
+                                                            let seasonCount = max(group.sortedSeasonKeys.count, 1)
+                                                            Text("\(seasonCount) Sezon \(group.episodes.count) Bölüm")
+                                                                .font(.system(size: 8, weight: .bold))
                                                                 .foregroundColor(.white)
-                                                                .padding(3)
+                                                                .padding(.horizontal, 4)
+                                                                .padding(.vertical, 3)
                                                                 .background(Color.black.opacity(0.75))
                                                                 .cornerRadius(4)
                                                                 .padding(4)

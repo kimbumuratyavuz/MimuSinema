@@ -35,6 +35,10 @@ public struct CustomPlayerView: View {
     @State private var controlsTimer: Timer?
     @State private var playbackErrorMessage: String? = nil
     @State private var itemObserver: NSKeyValueObservation? = nil
+    @State private var timeObserverToken: Any? = nil
+    @State private var didPlayToEndObserver: NSObjectProtocol? = nil
+    @State private var failedToPlayObserver: NSObjectProtocol? = nil
+    @State private var lastSavedProgressTime: Double = 0
     
     // Süre & Akıllı Arama Durumları
     @State private var currentTime: Double = 0
@@ -328,12 +332,30 @@ public struct CustomPlayerView: View {
             if isLandscapeMode {
                 OrientationManager.forceOrientation(.portrait)
             }
-            player?.pause()
-            player = nil
-            itemObserver?.invalidate()
-            itemObserver = nil
-            controlsTimer?.invalidate()
+            cleanupPlayer()
         }
+    }
+    
+    // MARK: - Bellek ve Oynatıcı Temizliği (Crash ve Sızıntıları Önler)
+    private func cleanupPlayer() {
+        if let token = timeObserverToken {
+            player?.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+        if let obs = didPlayToEndObserver {
+            NotificationCenter.default.removeObserver(obs)
+            didPlayToEndObserver = nil
+        }
+        if let obs = failedToPlayObserver {
+            NotificationCenter.default.removeObserver(obs)
+            failedToPlayObserver = nil
+        }
+        itemObserver?.invalidate()
+        itemObserver = nil
+        controlsTimer?.invalidate()
+        controlsTimer = nil
+        player?.pause()
+        player = nil
     }
     
     // MARK: - Ses Sistemi Yapılandırması (Sessiz Modda Bile Ses Çıkmasını Sağlar)
@@ -500,9 +522,7 @@ public struct CustomPlayerView: View {
     
     // MARK: - Oynatıcı Yükleme & Ses Optimizasyonu
     private func loadPlayer() {
-        player?.pause()
-        itemObserver?.invalidate()
-        itemObserver = nil
+        cleanupPlayer()
         playbackErrorMessage = nil
         hasCheckedSavedProgress = false
         showResumePrompt = false
@@ -590,30 +610,36 @@ public struct CustomPlayerView: View {
             }
         }
         
-        p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0, preferredTimescale: 600), queue: .main) { time in
+        timeObserverToken = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0, preferredTimescale: 600), queue: .main) { [weak p] time in
+            guard let p = p else { return }
             if !isDraggingSlider && !isSeeking {
                 self.currentTime = time.seconds
                 if let dur = p.currentItem?.duration.seconds, !dur.isNaN && !dur.isInfinite && dur > 0 {
                     self.totalDuration = dur
                 }
                 if self.totalDuration > 0 && !self.showResumePrompt {
-                    PlaybackProgressManager.shared.saveProgress(for: self.currentMedia, currentTime: time.seconds, totalDuration: self.totalDuration)
+                    // En fazla 5 saniyede bir diske yaz (her saniye I/O yapıp performansı düşürmez)
+                    if abs(time.seconds - self.lastSavedProgressTime) >= 5.0 {
+                        self.lastSavedProgressTime = time.seconds
+                        PlaybackProgressManager.shared.saveProgress(for: self.currentMedia, currentTime: time.seconds, totalDuration: self.totalDuration)
+                    }
                 }
             }
         }
         
-        NotificationCenter.default.addObserver(
+        didPlayToEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { _ in
+        ) { [weak p] _ in
+            guard p != nil else { return }
             PlaybackProgressManager.shared.clearProgress(for: self.currentMedia)
             if hasNextEpisode {
                 playNextEpisode()
             }
         }
         
-        NotificationCenter.default.addObserver(
+        failedToPlayObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
             queue: .main

@@ -150,6 +150,16 @@ public struct SeriesGroup: Identifiable {
         }
     }
     
+    /// Dizinin bölümlerinde Dublaj (TR) olup olmadığı
+    public var hasDubbing: Bool {
+        episodes.contains { $0.audioType == .dubbing }
+    }
+    
+    /// Dizinin bölümlerinde Altyazı (CC) olup olmadığı
+    public var hasSubtitle: Bool {
+        episodes.contains { $0.audioType == .subtitle }
+    }
+    
     public init(name: String, logoUrl: String? = nil, episodes: [MediaItem] = []) {
         self.name = name
         self.logoUrl = logoUrl

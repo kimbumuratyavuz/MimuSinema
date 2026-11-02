@@ -24,8 +24,16 @@ public final class DataManagerService: ObservableObject {
     private var currentSeriesPage = 0
     
     private init() {
-        let cache = URLCache(memoryCapacity: 100 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024, diskPath: "mimusinema_cache")
+        let cache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 100 * 1024 * 1024, diskPath: "mimusinema_cache")
         URLCache.shared = cache
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            URLCache.shared.removeAllCachedResponses()
+        }
         
         loadLocalCache()
     }
@@ -218,8 +226,10 @@ public final class DataManagerService: ObservableObject {
     private func saveMoviesToDisk(items: [MediaItem]) {
         let targetUrl = Self.moviesCacheFile
         Task.detached(priority: .background) {
-            if let data = try? JSONEncoder().encode(items) {
-                try? data.write(to: targetUrl)
+            autoreleasepool {
+                if let data = try? JSONEncoder().encode(items) {
+                    try? data.write(to: targetUrl, options: .atomic)
+                }
             }
         }
     }
@@ -227,9 +237,11 @@ public final class DataManagerService: ObservableObject {
     private func saveSeriesToDisk(groups: [SeriesGroup]) {
         let targetUrl = Self.seriesCacheFile
         Task.detached(priority: .background) {
-            let allEps = groups.flatMap { $0.episodes }
-            if let data = try? JSONEncoder().encode(allEps) {
-                try? data.write(to: targetUrl)
+            autoreleasepool {
+                let allEps = groups.flatMap { $0.episodes }
+                if let data = try? JSONEncoder().encode(allEps) {
+                    try? data.write(to: targetUrl, options: .atomic)
+                }
             }
         }
     }

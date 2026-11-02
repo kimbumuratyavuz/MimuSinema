@@ -6,16 +6,30 @@ public final class ImageCacheService {
     private let cache = NSCache<NSString, UIImage>()
     
     private init() {
-        cache.countLimit = 250 // Bellekte 250 afiş tut
-        cache.totalCostLimit = 100 * 1024 * 1024 // 100 MB RAM
+        cache.countLimit = 80 // Bellekte en fazla 80 afiş tut
+        cache.totalCostLimit = 50 * 1024 * 1024 // Maksimum 50 MB RAM
+        
+        // Cihaz bellek uyarısı verirse hemen afiş önbelleğini boşalt
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.cache.removeAllObjects()
+        }
     }
     
     public func image(for url: String) -> UIImage? {
         cache.object(forKey: url as NSString)
     }
     
-    public func insertImage(_ image: UIImage, for url: String) {
-        cache.setObject(image, forKey: url as NSString)
+    public func insertImage(_ image: UIImage, for url: String, cost: Int = 0) {
+        let actualCost = cost > 0 ? cost : Int(image.size.width * image.size.height * 4)
+        cache.setObject(image, forKey: url as NSString, cost: actualCost)
+    }
+    
+    public func clear() {
+        cache.removeAllObjects()
     }
 }
 
@@ -65,14 +79,20 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         
         var request = URLRequest(url: url)
         request.cachePolicy = .returnCacheDataElseLoad
+        request.timeoutInterval = 15
         
         URLSession.shared.dataTask(with: request) { data, response, error in
+            defer {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                }
+            }
+            
             guard let data = data, let uiImage = UIImage(data: data) else { return }
             
-            ImageCacheService.shared.insertImage(uiImage, for: urlStr)
+            ImageCacheService.shared.insertImage(uiImage, for: urlStr, cost: data.count)
             DispatchQueue.main.async {
                 self.loadedImage = uiImage
-                self.isLoading = false
             }
         }.resume()
     }

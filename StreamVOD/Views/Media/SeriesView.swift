@@ -6,23 +6,36 @@ public struct SeriesDetailView: View {
     @ObservedObject private var favoritesService = FavoritesService.shared
     
     @State private var selectedSeason: String = ""
-    @State private var selectedAudioFilter: AudioLanguageType = .all
+    @State private var selectedAudioFilter: AudioLanguageType = .dubbing
     @State private var playingIndex: Int? = nil
     
     private var isSeriesFav: Bool {
         favoritesService.isSeriesFavorite(seriesName: series.name)
     }
     
+    // Geçerli sezonda yer alan ses tipleri (Dublaj, Altyazı - "Tümü" seçeneği kaldırılmıştır)
+    private var availableAudioTypesForCurrentSeason: [AudioLanguageType] {
+        let seasonEps = series.seasons[selectedSeason] ?? series.episodes
+        var types: [AudioLanguageType] = []
+        if seasonEps.contains(where: { $0.audioType == .dubbing }) {
+            types.append(.dubbing)
+        }
+        if seasonEps.contains(where: { $0.audioType == .subtitle }) {
+            types.append(.subtitle)
+        }
+        if seasonEps.contains(where: { $0.audioType == .original }) && types.isEmpty {
+            types.append(.original)
+        }
+        if types.isEmpty {
+            types = [.dubbing, .subtitle]
+        }
+        return types
+    }
+    
     private var currentSeasonEpisodes: [MediaItem] {
         let eps = series.seasons[selectedSeason] ?? series.episodes
-        return eps.filter { item in
-            switch selectedAudioFilter {
-            case .all: return true
-            case .dubbing: return item.audioType == .dubbing
-            case .subtitle: return item.audioType == .subtitle
-            case .original: return item.audioType == .original
-            }
-        }
+        let filtered = eps.filter { $0.audioType == selectedAudioFilter }
+        return filtered.isEmpty ? eps : filtered
     }
     
     public var body: some View {
@@ -101,6 +114,10 @@ public struct SeriesDetailView: View {
                                     ForEach(series.sortedSeasonKeys, id: \.self) { seasonKey in
                                         Button(action: {
                                             selectedSeason = seasonKey
+                                            if let firstAvailable = availableAudioTypesForCurrentSeason.first,
+                                               !availableAudioTypesForCurrentSeason.contains(selectedAudioFilter) {
+                                                selectedAudioFilter = firstAvailable
+                                            }
                                         }) {
                                             Text(seasonKey)
                                                 .font(.subheadline)
@@ -118,22 +135,31 @@ public struct SeriesDetailView: View {
                         }
                     }
                     
-                    // DİL FİLTRESİ
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(AudioLanguageType.allCases, id: \.self) { type in
-                                Button(action: { selectedAudioFilter = type }) {
-                                    Text(type.rawValue)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 5)
-                                        .background(selectedAudioFilter == type ? Color.red : Color.white.opacity(0.1))
-                                        .foregroundColor(.white)
-                                        .cornerRadius(12)
+                    // DİL FİLTRESİ ("Tümü" filtresi kaldırıldı: yalnızca Dublaj ve Altyazı)
+                    if availableAudioTypesForCurrentSeason.count > 1 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("DİL SEÇİN")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.gray)
+                                .padding(.horizontal)
+                            
+                            HStack(spacing: 8) {
+                                ForEach(availableAudioTypesForCurrentSeason, id: \.self) { type in
+                                    Button(action: { selectedAudioFilter = type }) {
+                                        Text(type.rawValue)
+                                            .font(.caption)
+                                            .fontWeight(selectedAudioFilter == type ? .bold : .medium)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 6)
+                                            .background(selectedAudioFilter == type ? Color.red : Color.white.opacity(0.12))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
                                 }
                             }
+                            .padding(.horizontal)
                         }
-                        .padding(.horizontal)
                     }
                     
                     Divider().background(Color.gray.opacity(0.3))
@@ -221,6 +247,10 @@ public struct SeriesDetailView: View {
         .onAppear {
             if selectedSeason.isEmpty {
                 selectedSeason = series.sortedSeasonKeys.first ?? "1. Sezon"
+            }
+            if let firstAvailable = availableAudioTypesForCurrentSeason.first,
+               !availableAudioTypesForCurrentSeason.contains(selectedAudioFilter) {
+                selectedAudioFilter = firstAvailable
             }
         }
         .fullScreenCover(isPresented: Binding(
@@ -322,14 +352,44 @@ public struct SeriesView: View {
                                             .padding(5)
                                             .buttonStyle(.plain)
                                             
+                                            // Sağ Üst: Dublaj (TR) ve Altyazı (CC) Rozetleri
+                                            VStack {
+                                                HStack(spacing: 3) {
+                                                    Spacer()
+                                                    if group.hasDubbing {
+                                                        Text("TR")
+                                                            .font(.system(size: 9, weight: .bold))
+                                                            .foregroundColor(.white)
+                                                            .padding(.horizontal, 4)
+                                                            .padding(.vertical, 2)
+                                                            .background(Color.green)
+                                                            .cornerRadius(4)
+                                                    }
+                                                    if group.hasSubtitle {
+                                                        Text("CC")
+                                                            .font(.system(size: 9, weight: .bold))
+                                                            .foregroundColor(.white)
+                                                            .padding(.horizontal, 4)
+                                                            .padding(.vertical, 2)
+                                                            .background(Color.blue)
+                                                            .cornerRadius(4)
+                                                    }
+                                                }
+                                                .padding(5)
+                                                Spacer()
+                                            }
+                                            
+                                            // Sağ Alt: X Sezon X Bölüm Rozeti
                                             VStack {
                                                 Spacer()
                                                 HStack {
                                                     Spacer()
-                                                    Text("\(group.episodes.count) Bölüm")
-                                                        .font(.system(size: 9, weight: .bold))
+                                                    let seasonCount = max(group.sortedSeasonKeys.count, 1)
+                                                    Text("\(seasonCount) Sezon \(group.episodes.count) Bölüm")
+                                                        .font(.system(size: 8, weight: .bold))
                                                         .foregroundColor(.white)
-                                                        .padding(3)
+                                                        .padding(.horizontal, 4)
+                                                        .padding(.vertical, 3)
                                                         .background(Color.black.opacity(0.75))
                                                         .cornerRadius(4)
                                                         .padding(4)
