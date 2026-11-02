@@ -9,31 +9,21 @@ public struct MoviesView: View {
     @State private var searchText: String = ""
     @State private var playingMovie: MediaItem? = nil
     
-    // Açılır Liste Kategorileri
+    // Açılır Liste Kategorileri (Tüm M3U dosyasını kapsar)
     private var allCategories: [String] {
-        let cats = Set(dataManager.visibleMovies.map { $0.groupTitle })
-        return ["Tüm Kategoriler"] + cats.sorted()
+        dataManager.allMovieCategories
     }
     
-    // M3U Orijinal Sıralı Filtrelenmiş Filmler
+    // Filtrelenmiş veya Aranmış Filmler (Arama yapıldığında 50 ile sınırlı kalmaz, tüm M3U havuzunu tarar)
     private var filteredMovies: [MediaItem] {
-        dataManager.visibleMovies.filter { item in
-            let matchesCategory = (selectedCategory == "Tüm Kategoriler") || (item.groupTitle == selectedCategory)
-            
-            let matchesAudio: Bool
-            switch selectedAudioFilter {
-            case .all: matchesAudio = true
-            case .dubbing: matchesAudio = item.audioType == .dubbing
-            case .subtitle: matchesAudio = item.audioType == .subtitle
-            case .original: matchesAudio = item.audioType == .original
-            }
-            
-            let matchesSearch = searchText.isEmpty ||
-                item.cleanTitle.localizedCaseInsensitiveContains(searchText) ||
-                item.groupTitle.localizedCaseInsensitiveContains(searchText)
-            
-            return matchesCategory && matchesAudio && matchesSearch
-        }
+        dataManager.searchMovies(query: searchText, category: selectedCategory, audio: selectedAudioFilter)
+    }
+    
+    // Varsayılan sayfalama modunda mı yoksa arama/filtreleme modunda mı?
+    private var isSearchingOrFiltered: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        selectedCategory != "Tüm Kategoriler" ||
+        selectedAudioFilter != .all
     }
     
     // Ekranı dolduran 3'lü kolon ızgarası
@@ -65,9 +55,17 @@ public struct MoviesView: View {
                             Image(systemName: "film")
                                 .font(.system(size: 44))
                                 .foregroundColor(.gray)
-                            Text("Uygun film bulunamadı.")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                            if !searchText.isEmpty {
+                                Text("'\(searchText)' ile eşleşen film bulunamadı.")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                            } else {
+                                Text("Uygun film bulunamadı.")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                            }
                         }
                         Spacer()
                     } else {
@@ -85,7 +83,7 @@ public struct MoviesView: View {
                                         }
                                     )
                                     .onAppear {
-                                        if movie.id == dataManager.visibleMovies.last?.id && dataManager.hasMoreMovies {
+                                        if !isSearchingOrFiltered && movie.id == dataManager.visibleMovies.last?.id && dataManager.hasMoreMovies {
                                             dataManager.loadMoreMovies()
                                         }
                                     }
@@ -94,7 +92,7 @@ public struct MoviesView: View {
                             .padding(.horizontal, 10)
                             .padding(.top, 4)
                             
-                            if dataManager.hasMoreMovies {
+                            if !isSearchingOrFiltered && dataManager.hasMoreMovies {
                                 ProgressView()
                                     .tint(.red)
                                     .padding()

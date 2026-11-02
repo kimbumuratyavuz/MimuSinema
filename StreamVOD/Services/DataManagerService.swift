@@ -9,8 +9,8 @@ public final class DataManagerService: ObservableObject {
     public static let movieM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/filmuygulama.m3u")!
     public static let seriesM3UUrl = URL(string: "https://raw.githubusercontent.com/kimbumuratyavuz/capcanli/main/diziuygulama.m3u")!
     
-    private var allMoviesPool: [MediaItem] = []
-    private var allSeriesPool: [SeriesGroup] = []
+    @Published public private(set) var allMoviesPool: [MediaItem] = []
+    @Published public private(set) var allSeriesPool: [SeriesGroup] = []
     
     @Published public var visibleMovies: [MediaItem] = []
     @Published public var visibleSeries: [SeriesGroup] = []
@@ -144,6 +144,65 @@ public final class DataManagerService: ObservableObject {
     
     public var hasMoreSeries: Bool {
         visibleSeries.count < allSeriesPool.count
+    }
+    
+    // MARK: - Tüm M3U Genelinde Akıllı Arama & Filtreleme (50 Sınırı Olmadan)
+    
+    /// Tüm M3U havuzundaki benzersiz film kategorileri
+    public var allMovieCategories: [String] {
+        let pool = allMoviesPool.isEmpty ? visibleMovies : allMoviesPool
+        let cats = Set(pool.map { $0.groupTitle }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        return ["Tüm Kategoriler"] + cats.sorted()
+    }
+    
+    /// Tüm M3U film havuzunda kategori, ses ve akıllı metin araması (50 ile sınırlı kalmaz, tüm M3U'yu tarar)
+    public func searchMovies(query: String, category: String, audio: AudioLanguageType) -> [MediaItem] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isDefaultFilter = (trimmedQuery.isEmpty && category == "Tüm Kategoriler" && audio == .all)
+        
+        // Eğer hiçbir arama veya filtre yoksa akıcı performans için 50'şer gelen sayfalı listeyi ver
+        if isDefaultFilter {
+            return visibleMovies
+        }
+        
+        // Arama veya filtreleme yapılıyorsa TÜM M3U havuzunu tara
+        let pool = allMoviesPool.isEmpty ? visibleMovies : allMoviesPool
+        
+        return pool.filter { item in
+            let matchesCategory = (category == "Tüm Kategoriler") || (item.groupTitle == category)
+            
+            let matchesAudio: Bool
+            switch audio {
+            case .all: matchesAudio = true
+            case .dubbing: matchesAudio = item.audioType == .dubbing
+            case .subtitle: matchesAudio = item.audioType == .subtitle
+            case .original: matchesAudio = item.audioType == .original
+            }
+            
+            let matchesQuery = trimmedQuery.isEmpty || item.matchesQuery(trimmedQuery)
+            
+            return matchesCategory && matchesAudio && matchesQuery
+        }
+    }
+    
+    /// Tüm M3U dizi havuzunda dizi adı veya bölüm başlığı araması (50 ile sınırlı kalmaz, tüm M3U'yu tarar)
+    public func searchSeries(query: String) -> [SeriesGroup] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedQuery.isEmpty {
+            return visibleSeries
+        }
+        
+        let pool = allSeriesPool.isEmpty ? visibleSeries : allSeriesPool
+        
+        return pool.filter { group in
+            if group.name.matchesSearch(trimmedQuery) {
+                return true
+            }
+            // Dizi içindeki bölümlerde de eşleşme ara
+            return group.episodes.contains { ep in
+                ep.matchesQuery(trimmedQuery)
+            }
+        }
     }
     
     private static var moviesCacheFile: URL {

@@ -50,7 +50,7 @@ public struct FavoritesView: View {
                                             if item.isSeries {
                                                 // Dizi ise Sezon & Bölüm detayını aç
                                                 let sName = item.seriesName ?? item.cleanTitle
-                                                if let found = dataManager.visibleSeries.first(where: { $0.name == sName }) {
+                                                if let found = dataManager.allSeriesPool.first(where: { $0.name == sName }) ?? dataManager.visibleSeries.first(where: { $0.name == sName }) {
                                                     selectedSeriesGroup = found
                                                 } else {
                                                     selectedSeriesGroup = SeriesGroup(name: sName, logoUrl: item.logoUrl, episodes: [item])

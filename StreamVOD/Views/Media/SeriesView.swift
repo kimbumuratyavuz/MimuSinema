@@ -247,13 +247,13 @@ public struct SeriesView: View {
     
     @State private var searchText: String = ""
     
+    // Aranmış veya Sayfalanmış Diziler (Arama yapıldığında 50 ile sınırlı kalmaz, tüm M3U havuzunu tarar)
     private var filteredSeries: [SeriesGroup] {
-        if searchText.isEmpty {
-            return dataManager.visibleSeries
-        }
-        return dataManager.visibleSeries.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
-        }
+        dataManager.searchSeries(query: searchText)
+    }
+    
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     private let gridColumns = [
@@ -274,8 +274,21 @@ public struct SeriesView: View {
                             .foregroundColor(.white)
                     }
                 } else if filteredSeries.isEmpty {
-                    Text("Dizi bulunamadı.")
-                        .foregroundColor(.gray)
+                    VStack(spacing: 8) {
+                        Image(systemName: "tv")
+                            .font(.system(size: 44))
+                            .foregroundColor(.gray)
+                        if !searchText.isEmpty {
+                            Text("'\(searchText)' ile eşleşen dizi bulunamadı.")
+                                .foregroundColor(.white)
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        } else {
+                            Text("Dizi bulunamadı.")
+                                .foregroundColor(.gray)
+                        }
+                    }
                 } else {
                     ScrollView {
                         LazyVGrid(columns: gridColumns, spacing: 14) {
@@ -346,7 +359,7 @@ public struct SeriesView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .onAppear {
-                                    if group.id == dataManager.visibleSeries.last?.id && dataManager.hasMoreSeries {
+                                    if !isSearching && group.id == dataManager.visibleSeries.last?.id && dataManager.hasMoreSeries {
                                         dataManager.loadMoreSeries()
                                     }
                                 }
@@ -355,7 +368,7 @@ public struct SeriesView: View {
                         .padding(.horizontal, 10)
                         .padding(.top, 6)
                         
-                        if dataManager.hasMoreSeries {
+                        if !isSearching && dataManager.hasMoreSeries {
                             ProgressView()
                                 .tint(.red)
                                 .padding()

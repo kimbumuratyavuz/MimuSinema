@@ -121,3 +121,31 @@ public struct SeriesGroup: Identifiable {
         self.episodes = episodes
     }
 }
+
+// MARK: - Akıllı Arama & Türkçe Karakter Toleransı Eklentileri
+public extension String {
+    func matchesSearch(_ query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if self.localizedCaseInsensitiveContains(trimmed) { return true }
+        if self.localizedStandardContains(trimmed) { return true }
+        
+        // Türkçe karakter ve aksan duyarsız eşleştirme (örn: ç/c, ğ/g, ı/i, ö/o, ş/s, ü/u)
+        let normSelf = self.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "tr"))
+        let normQuery = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "tr"))
+        return normSelf.contains(normQuery)
+    }
+}
+
+public extension MediaItem {
+    func matchesQuery(_ query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if cleanTitle.matchesSearch(trimmed) { return true }
+        if title.matchesSearch(trimmed) { return true }
+        if groupTitle.matchesSearch(trimmed) { return true }
+        if let ep = episodeTitle, ep.matchesSearch(trimmed) { return true }
+        if let ser = seriesName, ser.matchesSearch(trimmed) { return true }
+        return false
+    }
+}
